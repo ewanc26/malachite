@@ -1,10 +1,15 @@
 import { AtpAgent } from '@atproto/api';
 import { prompt } from '../utils/input.js';
 
+interface ResolverResponse {
+  did: string;
+  pds: string;
+}
+
 /**
  * Resolves an AT Protocol identifier (handle or DID) to get PDS information
  */
-async function resolveIdentifier(identifier, resolverUrl) {
+async function resolveIdentifier(identifier: string, resolverUrl: string): Promise<ResolverResponse> {
   console.log(`Resolving identifier: ${identifier}`);
   
   const response = await fetch(
@@ -15,7 +20,7 @@ async function resolveIdentifier(identifier, resolverUrl) {
     throw new Error(`Failed to resolve identifier: ${response.status} ${response.statusText}`);
   }
   
-  const data = await response.json();
+  const data = await response.json() as ResolverResponse;
   
   if (!data.did || !data.pds) {
     throw new Error('Invalid response from identity resolver');
@@ -28,7 +33,11 @@ async function resolveIdentifier(identifier, resolverUrl) {
 /**
  * Login to ATProto using Slingshot resolver
  */
-export async function login(identifier, password, resolverUrl) {
+export async function login(
+  identifier: string | undefined,
+  password: string | undefined,
+  resolverUrl: string
+): Promise<AtpAgent> {
   console.log('\n=== ATProto Login ===');
   
   // Prompt for missing credentials
@@ -58,19 +67,20 @@ export async function login(identifier, password, resolverUrl) {
     });
     
     console.log('✓ Logged in successfully!');
-    console.log(`  DID: ${pdsAgent.session.did}`);
-    console.log(`  Handle: ${pdsAgent.session.handle}\n`);
+    console.log(`  DID: ${pdsAgent.session?.did}`);
+    console.log(`  Handle: ${pdsAgent.session?.handle}\n`);
     
     return pdsAgent;
   } catch (error) {
-    console.error('✗ Login failed:', error.message);
+    const err = error as Error;
+    console.error('✗ Login failed:', err.message);
     
     // Provide more specific error messages
-    if (error.message.includes('Failed to resolve identifier')) {
+    if (err.message.includes('Failed to resolve identifier')) {
       throw new Error('Handle not found. Please check your AT Protocol handle.');
-    } else if (error.message.includes('AuthFactorTokenRequired')) {
+    } else if (err.message.includes('AuthFactorTokenRequired')) {
       throw new Error('Two-factor authentication required. Please use your app password.');
-    } else if (error.message.includes('InvalidCredentials')) {
+    } else if (err.message.includes('InvalidCredentials')) {
       throw new Error('Invalid credentials. Please check your handle and app password.');
     }
     

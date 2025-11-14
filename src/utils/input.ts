@@ -3,28 +3,28 @@ import * as readline from 'readline';
 /**
  * Read user input from command line with proper password masking
  */
-export function prompt(question, hideInput = false) {
+export function prompt(question: string, hideInput = false): Promise<string> {
   return new Promise((resolve) => {
     if (hideInput) {
       // For password input, use raw mode
       const stdin = process.stdin;
       const wasRaw = stdin.isRaw;
-      
+
       // Set raw mode to capture individual keystrokes
       if (stdin.isTTY) {
         stdin.setRawMode(true);
       }
-      
+
       stdin.resume();
       stdin.setEncoding('utf8');
-      
+
       process.stdout.write(question);
-      
+
       let password = '';
-      const onData = (char) => {
-        char = char.toString();
-        
-        switch (char) {
+      const onData = (char: Buffer | string) => {
+        const charStr = char.toString();
+
+        switch (charStr) {
           case '\n':
           case '\r':
           case '\u0004': // Ctrl-D
@@ -49,19 +49,19 @@ export function prompt(question, hideInput = false) {
             }
             break;
           default:
-            password += char;
+            password += charStr;
             process.stdout.write('*');
             break;
         }
       };
-      
+
       stdin.on('data', onData);
     } else {
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
       });
-      
+
       rl.question(question, (answer) => {
         rl.close();
         resolve(answer);

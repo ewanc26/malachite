@@ -1,10 +1,11 @@
 import * as fs from 'fs';
 import { parse } from 'csv-parse/sync';
+import type { LastFmCsvRecord, PlayRecord, Config } from '../types.js';
 
 /**
  * Parse Last.fm CSV export
  */
-export function parseLastFmCsv(filePath) {
+export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
   console.log(`Reading CSV file: ${filePath}`);
   const fileContent = fs.readFileSync(filePath, 'utf-8');
   
@@ -12,7 +13,7 @@ export function parseLastFmCsv(filePath) {
     columns: true,
     skip_empty_lines: true,
     trim: true,
-  });
+  }) as LastFmCsvRecord[];
   
   console.log(`✓ Parsed ${records.length} scrobbles\n`);
   return records;
@@ -21,7 +22,7 @@ export function parseLastFmCsv(filePath) {
 /**
  * Convert Last.fm CSV record to ATProto play record
  */
-export function convertToPlayRecord(csvRecord, config) {
+export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config): PlayRecord {
   const { RECORD_TYPE, CLIENT_AGENT } = config;
   
   // Parse the timestamp
@@ -29,9 +30,9 @@ export function convertToPlayRecord(csvRecord, config) {
   const playedTime = new Date(timestamp * 1000).toISOString();
   
   // Build artists array
-  const artists = [];
+  const artists: PlayRecord['artists'] = [];
   if (csvRecord.artist) {
-    const artistData = {
+    const artistData: PlayRecord['artists'][0] = {
       artistName: csvRecord.artist,
     };
     if (csvRecord.artist_mbid && csvRecord.artist_mbid.trim()) {
@@ -41,13 +42,14 @@ export function convertToPlayRecord(csvRecord, config) {
   }
   
   // Build the play record
-  const playRecord = {
+  const playRecord: PlayRecord = {
     $type: RECORD_TYPE,
     trackName: csvRecord.track,
     artists,
     playedTime,
     submissionClientAgent: CLIENT_AGENT,
     musicServiceBaseDomain: 'last.fm',
+    originUrl: '',
   };
   
   // Add optional fields
@@ -74,7 +76,7 @@ export function convertToPlayRecord(csvRecord, config) {
 /**
  * Sort records chronologically
  */
-export function sortRecords(records, reverseChronological = false) {
+export function sortRecords(records: PlayRecord[], reverseChronological = false): PlayRecord[] {
   console.log(`Sorting records ${reverseChronological ? 'newest' : 'oldest'} first...`);
   
   records.sort((a, b) => {
