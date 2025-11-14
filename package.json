@@ -1,23 +1,36 @@
 {
   "name": "lastfm-importer",
-  "version": "1.0.0",
-  "description": "Import Last.fm scrobbles to ATProto",
+  "version": "0.0.2",
+  "description": "Import Last.fm scrobbles to ATProto with rate limiting",
   "type": "module",
-  "main": "importer.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "lastfm-import": "./dist/index.js"
+  },
   "scripts": {
-    "start": "node importer.js",
-    "dry-run": "node importer.js --dry-run"
+    "build": "tsc",
+    "start": "npm run build && node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "dry-run": "npm run build && node dist/index.js --dry-run",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit"
   },
   "keywords": [
     "lastfm",
     "atproto",
     "bluesky",
-    "import"
+    "import",
+    "typescript"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@atproto/api": "^0.13.0",
     "csv-parse": "^5.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
   }
 }
