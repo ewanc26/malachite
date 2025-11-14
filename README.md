@@ -2,6 +2,8 @@
 
 Import your Last.fm listening history to the AT Protocol network using the `fm.teal.alpha.feed.play` lexicon.
 
+(Also [on Tangled!](https://tangled.org/@did:plc:ofrbh253gwicbkc5nktqepol/atproto-lastfm-importer))
+
 ## Setup
 
 ```bash
