@@ -1,0 +1,23 @@
+{
+  "name": "lastfm-importer",
+  "version": "1.0.0",
+  "description": "Import Last.fm scrobbles to ATProto",
+  "type": "module",
+  "main": "importer.js",
+  "scripts": {
+    "start": "node importer.js",
+    "dry-run": "node importer.js --dry-run"
+  },
+  "keywords": [
+    "lastfm",
+    "atproto",
+    "bluesky",
+    "import"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@atproto/api": "^0.13.0",
+    "csv-parse": "^5.5.0"
+  }
+}
