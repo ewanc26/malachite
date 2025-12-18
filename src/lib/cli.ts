@@ -3,7 +3,7 @@ import { AtpAgent } from '@atproto/api'; // Use AtpAgent for consistency
 import type { PlayRecord, Config, CommandLineArgs, PublishResult } from '../types.js'; 
 import { login } from './auth.js'; 
 import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js'; 
-import { publishRecords } from './publisher.js'; 
+import { publishRecordsWithApplyWrites } from './publisher-applywrites.js'; 
 import { prompt } from '../utils/input.js'; 
 import config from '../config.js'; 
 import { calculateOptimalBatchSize, showRateLimitInfo } from '../utils/helpers.js'; 
@@ -144,7 +144,7 @@ export async function runCLI(): Promise<void> {
         }
         
         // 6. Publish Records
-        const result: PublishResult = await publishRecords(
+        const result: PublishResult = await publishRecordsWithApplyWrites(
             agent, 
             sortedRecords,
             batchSize,

@@ -4,6 +4,18 @@ Import your Last.fm listening history to the AT Protocol network using the `fm.t
 
 (Also [on Tangled!](https://tangled.org/@did:plc:ofrbh253gwicbkc5nktqepol/atproto-lastfm-importer))
 
+## ⚠️ IMPORTANT: Untested Implementation
+
+**This version now uses `com.atproto.repo.applyWrites` for batch operations, which is currently UNTESTED.**
+
+- The implementation has been refactored to use batch writes (up to 10 records per API call)
+- This should improve performance and reduce API calls significantly
+- **However, this has not been tested in production**
+- Please test with `--dry-run` first and start with small imports
+- Report any issues on the GitHub repository
+
+If you need the stable version using individual `createRecord` calls, check out the previous commit.
+
 ## Features
 
 - ✅ **Rate Limiting**: Automatically limits imports to 1K records per day to prevent rate limiting your entire PDS
@@ -259,7 +271,9 @@ npm run clean
 2. Sorts records chronologically (or reverse if `-r` flag)
 3. Converts Last.fm format to `fm.teal.alpha.feed.play` schema
 4. Validates required fields
-5. Publishes in batches with configurable delays
+5. Publishes in batches using `com.atproto.repo.applyWrites` (up to 10 records per call)
+
+**Note:** The batch publishing now uses `applyWrites` instead of individual `createRecord` calls. This is more efficient but currently untested.
 
 ### Data Mapping
 - **Track info**: Direct mapping from CSV columns
