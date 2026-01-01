@@ -13,7 +13,7 @@ async function resolveIdentifier(identifier: string, resolverUrl: string): Promi
   console.log(`Resolving identifier: ${identifier}`);
   
   const response = await fetch(
-    `${resolverUrl}?identifier=${encodeURIComponent(identifier)}`
+    `${resolverUrl}/xrpc/com.bad-example.identity.resolveMiniDoc?identifier=${encodeURIComponent(identifier)}`
   );
   
   if (!response.ok) {

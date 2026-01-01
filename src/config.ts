@@ -29,7 +29,7 @@ export const MIN_BATCH_DELAY = 1000;
 export const MAX_BATCH_SIZE = 50;
 
 // Slingshot resolver URL
-export const SLINGSHOT_RESOLVER = 'https://slingshot.danner.cloud';
+export const SLINGSHOT_RESOLVER = 'https://slingshot.microcosm.blue';
 
 const config: Config = {
   RECORD_TYPE,
