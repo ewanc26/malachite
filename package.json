@@ -26,11 +26,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@atproto/api": "^0.13.0",
-    "csv-parse": "^5.5.0"
+    "@atproto/api": "^0.13.35",
+    "csv-parse": "^5.6.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "typescript": "^5.3.0"
+    "@types/node": "^20.19.27",
+    "typescript": "^5.9.3"
   }
 }
