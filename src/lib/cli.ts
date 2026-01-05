@@ -14,7 +14,7 @@ import { fetchExistingRecords, filterNewRecords, displaySyncStats } from './sync
  */
 export function showHelp(): void {
     console.log(`
-Last.fm to ATProto Importer v0.0.2
+Last.fm to ATProto Importer v0.1.0
 
 Usage: npm start [options]
 
