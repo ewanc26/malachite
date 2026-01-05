@@ -1,26 +1,28 @@
 import { AtpAgent } from '@atproto/api';
 import { prompt } from '../utils/input.js';
 
-interface ResolverResponse {
+interface ResolvedIdentity {
   did: string;
+  handle: string;
   pds: string;
+  signing_key: string;
 }
 
 /**
  * Resolves an AT Protocol identifier (handle or DID) to get PDS information
  */
-async function resolveIdentifier(identifier: string, resolverUrl: string): Promise<ResolverResponse> {
+async function resolveIdentifier(identifier: string): Promise<ResolvedIdentity> {
   console.log(`Resolving identifier: ${identifier}`);
   
   const response = await fetch(
-    `${resolverUrl}/xrpc/com.bad-example.identity.resolveMiniDoc?identifier=${encodeURIComponent(identifier)}`
+    `https://slingshot.microcosm.blue/xrpc/com.bad-example.identity.resolveMiniDoc?identifier=${encodeURIComponent(identifier)}`
   );
   
   if (!response.ok) {
     throw new Error(`Failed to resolve identifier: ${response.status} ${response.statusText}`);
   }
   
-  const data = await response.json() as ResolverResponse;
+  const data = await response.json() as ResolvedIdentity;
   
   if (!data.did || !data.pds) {
     throw new Error('Invalid response from identity resolver');
@@ -36,7 +38,7 @@ async function resolveIdentifier(identifier: string, resolverUrl: string): Promi
 export async function login(
   identifier: string | undefined,
   password: string | undefined,
-  resolverUrl: string
+  _resolverUrl?: string // Keep parameter for backwards compatibility but don't use it
 ): Promise<AtpAgent> {
   console.log('\n=== ATProto Login ===');
   
@@ -54,23 +56,25 @@ export async function login(
   }
   
   try {
-    // Resolve the identifier to get PDS
-    const resolved = await resolveIdentifier(identifier, resolverUrl);
+    // Resolve the identifier to get PDS and other info
+    const resolved = await resolveIdentifier(identifier);
     
-    // Create agent with resolved PDS
-    const pdsAgent = new AtpAgent({ service: resolved.pds });
-    
-    // Login using the resolved DID
-    await pdsAgent.login({
+    // Initialize the agent with the resolved PDS URL
+    const agent = new AtpAgent({
+      service: resolved.pds,
+    });
+
+    // Attempt to login using the resolved DID for more reliable authentication
+    await agent.login({
       identifier: resolved.did,
       password: password,
     });
     
     console.log('✓ Logged in successfully!');
-    console.log(`  DID: ${pdsAgent.session?.did}`);
-    console.log(`  Handle: ${pdsAgent.session?.handle}\n`);
+    console.log(`  DID: ${agent.session?.did}`);
+    console.log(`  Handle: ${agent.session?.handle}\n`);
     
-    return pdsAgent;
+    return agent;
   } catch (error) {
     const err = error as Error;
     console.error('✗ Login failed:', err.message);
@@ -80,10 +84,12 @@ export async function login(
       throw new Error('Handle not found. Please check your AT Protocol handle.');
     } else if (err.message.includes('AuthFactorTokenRequired')) {
       throw new Error('Two-factor authentication required. Please use your app password.');
+    } else if (err.message.includes('AccountTakedown') || err.message.includes('AccountSuspended')) {
+      throw new Error('Account is suspended or has been taken down.');
     } else if (err.message.includes('InvalidCredentials')) {
       throw new Error('Invalid credentials. Please check your handle and app password.');
+    } else {
+      throw new Error(`Login failed: ${err.message || 'Unknown error'}`);
     }
-    
-    throw error;
   }
 }

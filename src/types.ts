@@ -6,12 +6,13 @@ import { AtpAgent as Agent } from '@atproto/api';
 export type AtpAgent = Agent;
 
 export interface LastFmCsvRecord {
-  artist: string;
-  track: string;
-  album: string;
   uts: string;
+  utc_time: string;
+  artist: string;
   artist_mbid?: string;
+  album: string;
   album_mbid?: string;
+  track: string;
   track_mbid?: string;
 }
 
@@ -43,6 +44,7 @@ export interface CommandLineArgs {
   yes?: boolean;
   'dry-run'?: boolean;
   'reverse-chronological'?: boolean;
+  sync?: boolean;
 }
 
 export interface PublishResult {

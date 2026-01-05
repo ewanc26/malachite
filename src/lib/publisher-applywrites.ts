@@ -24,13 +24,14 @@ export async function publishRecordsWithApplyWrites(
   batchSize: number,
   batchDelay: number,
   config: Config,
-  dryRun = false
+  dryRun = false,
+  syncMode = false
 ): Promise<PublishResult> {
   const { RECORD_TYPE } = config;
   const totalRecords = records.length;
 
   if (dryRun) {
-    return handleDryRun(records, batchSize, batchDelay, config);
+    return handleDryRun(records, batchSize, batchDelay, config, syncMode);
   }
 
   if (!agent) {
@@ -250,7 +251,8 @@ function handleDryRun(
   records: PlayRecord[],
   batchSize: number,
   batchDelay: number,
-  config: Config
+  config: Config,
+  syncMode: boolean
 ): PublishResult {
   const totalRecords = records.length;
 
@@ -293,7 +295,10 @@ function handleDryRun(
     }
   }
 
-  console.log(`\n=== DRY RUN MODE ===`);
+  console.log(`\n=== DRY RUN MODE ${syncMode ? '(SYNC)' : ''} ===`);
+  if (syncMode) {
+    console.log(`Sync mode enabled: Only new records will be published`);
+  }
   console.log(`Would publish ${totalRecords} records using applyWrites`);
   console.log(`Batch size: ${Math.min(batchSize, MAX_APPLY_WRITES_OPS)} records per applyWrites call`);
 

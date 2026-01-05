@@ -6,7 +6,8 @@ import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js'
 import { publishRecordsWithApplyWrites } from './publisher-applywrites.js'; 
 import { prompt } from '../utils/input.js'; 
 import config from '../config.js'; 
-import { calculateOptimalBatchSize, showRateLimitInfo } from '../utils/helpers.js'; 
+import { calculateOptimalBatchSize, showRateLimitInfo } from '../utils/helpers.js';
+import { fetchExistingRecords, filterNewRecords, displaySyncStats } from './sync.js'; 
 
 /**
  * Show help message
@@ -27,6 +28,7 @@ Options:
   -y, --yes                      Skip confirmation prompt
   -n, --dry-run                  Preview records without publishing
   -r, --reverse-chronological    Process newest first (default: oldest first)
+  -s, --sync                     Re-sync mode: check existing Teal records and only import new ones
 `);
 }
 
@@ -45,6 +47,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
         yes: { type: 'boolean', short: 'y', default: false },
         'dry-run': { type: 'boolean', short: 'n', default: false },
         'reverse-chronological': { type: 'boolean', short: 'r', default: false },
+        sync: { type: 'boolean', short: 's', default: false },
     } as const; 
     
     try {
@@ -76,10 +79,11 @@ export async function runCLI(): Promise<void> {
         }
 
         const dryRun = args['dry-run'] ?? false;
+        const syncMode = args.sync ?? false;
         let agent: AtpAgent | null = null;
 
-        // 1. Get Authentication (skips login if dry-run)
-        if (!dryRun) {
+        // 1. Get Authentication (required for sync mode, even in dry-run)
+        if (!dryRun || syncMode) {
             if (!args.identifier || !args.password) {
                 throw new Error('Missing required arguments for login: -i (identifier) and -p (password)');
             }
@@ -92,7 +96,21 @@ export async function runCLI(): Promise<void> {
         const csvRecords = parseLastFmCsv(args.file); 
         
         // This function maps the raw CSV records to the standardized PlayRecord structure
-        const records: PlayRecord[] = csvRecords.map(record => convertToPlayRecord(record, cfg));
+        let records: PlayRecord[] = csvRecords.map(record => convertToPlayRecord(record, cfg));
+        
+        // 2.5. Sync Mode: Fetch existing records and filter duplicates
+        if (syncMode && agent) {
+            const existingRecords = await fetchExistingRecords(agent, cfg);
+            records = filterNewRecords(records, existingRecords);
+            
+            if (records.length === 0) {
+                console.log('✓ All records already exist in Teal. Nothing to import!');
+                process.exit(0);
+            }
+            
+            displaySyncStats(csvRecords.map(r => convertToPlayRecord(r, cfg)), existingRecords, records);
+        }
+        
         const totalRecords = records.length;
         
         const reverseChronological = args['reverse-chronological'] ?? false;
@@ -135,7 +153,11 @@ export async function runCLI(): Promise<void> {
 
         // 5. Confirmation Prompt
         if (!dryRun && !(args.yes ?? false)) {
-            console.log(`\nReady to publish ${totalRecords.toLocaleString()} records.`);
+            if (syncMode) {
+                console.log(`\nReady to publish ${totalRecords.toLocaleString()} NEW records (${csvRecords.length - totalRecords} duplicates skipped).`);
+            } else {
+                console.log(`\nReady to publish ${totalRecords.toLocaleString()} records.`);
+            }
             const answer = await prompt('Do you want to continue? (y/N) ');
             if (answer.toLowerCase() !== 'y') {
                 console.log('Import cancelled by user.');
@@ -150,17 +172,21 @@ export async function runCLI(): Promise<void> {
             batchSize,
             batchDelay,
             cfg,
-            dryRun
+            dryRun,
+            syncMode
         );
 
         // 7. Final Output
         if (result.cancelled) {
             console.log(`\nImport stopped gracefully. ${result.successCount} records processed.`);
         } else if (dryRun) {
-            console.log('\nDRY RUN COMPLETE. No records were published.');
+            console.log(`\nDRY RUN COMPLETE${syncMode ? ' (SYNC MODE)' : ''}. No records were published.`);
         } else {
-            console.log(`\n🎉 Import Complete!`);
+            console.log(`\n🎉 ${syncMode ? 'Sync' : 'Import'} Complete!`);
             console.log(`Total records processed: ${result.successCount.toLocaleString()} (${result.errorCount.toLocaleString()} failed)`);
+            if (syncMode) {
+                console.log(`Duplicates skipped: ${csvRecords.length - totalRecords}`);
+            }
         }
 
     } catch (error) {

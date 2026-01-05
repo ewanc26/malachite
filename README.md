@@ -18,6 +18,7 @@ If you need the stable version using individual `createRecord` calls, check out 
 
 ## Features
 
+- ✅ **Re-Sync Mode**: Check existing Teal records and only import new scrobbles (no duplicates!)
 - ✅ **Rate Limiting**: Automatically limits imports to 1K records per day to prevent rate limiting your entire PDS
 - ✅ **Multi-Day Imports**: Large imports (>1K records) automatically span multiple days with 24-hour pauses
 - ✅ **Resume Support**: Safe to stop (Ctrl+C) and restart - continues from where it left off
@@ -51,6 +52,32 @@ npm run build
 ```
 
 ## Usage
+
+### Re-Sync Mode (NEW!)
+
+If you've already imported scrobbles before and want to sync your Last.fm export with Teal without creating duplicates:
+
+```bash
+# Preview what will be synced
+npm start -- -f lastfm.csv -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --sync --dry-run
+
+# Perform the sync
+npm start -- -f lastfm.csv -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --sync -y
+```
+
+Sync mode will:
+1. Fetch all existing play records from your Teal feed
+2. Compare them against your Last.fm export
+3. Identify gaps (scrobbles in Last.fm that aren't in Teal)
+4. Only import the missing records
+5. Show detailed statistics about duplicates and new records
+
+This is perfect for:
+- Re-running imports with updated Last.fm exports
+- Recovering from interrupted imports
+- Adding recent scrobbles without duplicating old ones
+
+**Note:** Sync mode requires authentication even in dry-run mode to fetch existing records.
 
 ### Interactive Mode
 
@@ -91,6 +118,7 @@ npm start -- -f lastfm.csv -i alice.bsky.social -r -y
 | `--yes` | `-y` | Skip confirmation prompt | false |
 | `--dry-run` | `-n` | Preview without publishing | false |
 | `--reverse-chronological` | `-r` | Process newest first | false (oldest first) |
+| `--sync` | `-s` | Re-sync mode: only import new records | false |
 
 ### Batch Settings
 
@@ -108,7 +136,7 @@ The importer automatically calculates optimal batch settings based on your total
 
 ## Getting Your Last.fm Data
 
-1. Go to <https://lastfm.ghan.nl/export/>
+1. Go to <https://mainstream.ghan.nl/export.html>
 2. Request your data export in CSV format
 3. Download the CSV file when ready
 4. Use the CSV file path with this script
