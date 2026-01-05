@@ -24,7 +24,7 @@
     "typescript"
   ],
   "author": "",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@atproto/api": "^0.13.35",
     "csv-parse": "^5.6.0"
