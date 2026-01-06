@@ -17,7 +17,7 @@ export const SAFETY_MARGIN = 1.0;
 export const RECORD_TYPE = 'fm.teal.alpha.feed.play';
 
 // Client agent
-export const CLIENT_AGENT = 'lastfm-importer/v0.2.0';
+export const CLIENT_AGENT = 'lastfm-importer/v0.3.0';
 
 // Default batch configuration - aggressive defaults for maximum speed
 // Will dynamically adjust based on success/failure

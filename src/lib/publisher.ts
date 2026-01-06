@@ -7,6 +7,7 @@ import {
   displayRateLimitInfo,
   calculateRateLimitedBatches,
 } from '../utils/rate-limiter.js';
+import { generateTIDFromISO } from '../utils/tid.js';
 import type { PlayRecord, Config, PublishResult } from '../types.js';
 
 /**
@@ -79,10 +80,11 @@ export async function publishRecordsWithApplyWrites(
 
     const batchStartTime = Date.now();
 
-    // Build writes array for applyWrites
+    // Build writes array for applyWrites with TID-based rkeys
     const writes = batch.map((record) => ({
       $type: 'com.atproto.repo.applyWrites#create',
       collection: RECORD_TYPE,
+      rkey: generateTIDFromISO(record.playedTime),
       value: record,
     }));
 

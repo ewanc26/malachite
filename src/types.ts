@@ -45,6 +45,7 @@ export interface CommandLineArgs {
   'dry-run'?: boolean;
   'reverse-chronological'?: boolean;
   sync?: boolean;
+  spotify?: boolean;
   'remove-duplicates'?: boolean;
 }
 
