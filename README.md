@@ -7,7 +7,8 @@ Import your Last.fm listening history to the AT Protocol network using the `fm.t
 ## Features
 
 - ✅ **Batch Operations**: Uses `com.atproto.repo.applyWrites` for efficient batch publishing (up to 200 records per call)
-
+- ✅ **Spotify Support**: Import from Spotify Extended Streaming History (JSON format)
+- ✅ **TID-based Record Keys**: Records use timestamp-based identifiers for chronological ordering
 - ✅ **Re-Sync Mode**: Check existing Teal records and only import new scrobbles (no duplicates!)
 - ✅ **Rate Limiting**: Automatically limits imports to 1K records per day to prevent rate limiting your entire PDS
 - ✅ **Multi-Day Imports**: Large imports (>1K records) automatically span multiple days with 24-hour pauses
@@ -19,7 +20,7 @@ Import your Last.fm listening history to the AT Protocol network using the `fm.t
 - ✅ **Batch Processing**: Configurable batching with rate limit safety
 - ✅ **Progress Tracking**: Real-time progress with time estimates
 - ✅ **Error Handling**: Continues on errors with detailed reporting
-- ✅ **MusicBrainz Support**: Preserves MusicBrainz IDs when available
+- ✅ **MusicBrainz Support**: Preserves MusicBrainz IDs when available (Last.fm only)
 - ✅ **Chronological Ordering**: Processes oldest first (or newest with `-r` flag)
 
 ## Important: Rate Limits
@@ -82,11 +83,20 @@ npm start
 For automation or scripting, provide all parameters via flags:
 
 ```bash
-# Full automation
+# Full automation (Last.fm)
 npm start -- -f lastfm.csv -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+
+# Import from Spotify (single file)
+npm start -- -f Streaming_History_Audio_2021-2023_0.json --spotify -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+
+# Import from Spotify (directory with multiple files - recommended)
+npm start -- -f '/path/to/Spotify Extended Streaming History' --spotify -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 # Preview without publishing
 npm start -- -f lastfm.csv --dry-run
+
+# Preview Spotify import
+npm start -- -f '/path/to/Spotify Extended Streaming History' --spotify --dry-run
 
 # Custom batch settings (advanced users)
 npm start -- -f lastfm.csv -i alice.bsky.social -b 20 -d 3000
@@ -100,7 +110,8 @@ npm start -- -f lastfm.csv -i alice.bsky.social -r -y
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
 | `--help` | `-h` | Show help message | - |
-| `--file <path>` | `-f` | Path to Last.fm CSV export file | (prompted) |
+| `--file <path>` | `-f` | Path to Last.fm CSV or Spotify JSON file/directory | (prompted) |
+| `--spotify` | | Import from Spotify JSON export instead of Last.fm | false |
 | `--identifier <id>` | `-i` | ATProto handle or DID | (prompted) |
 | `--password <pass>` | `-p` | ATProto app password | (prompted) |
 | `--batch-size <num>` | `-b` | Records per batch | Auto-calculated |
@@ -124,32 +135,50 @@ The importer automatically calculates optimal batch settings based on your total
 
 ⚠️ Lower delays increase speed but risk hitting rate limits. The automatic calculation is recommended.
 
-## Getting Your Last.fm Data
+## Getting Your Data
+
+### Last.fm Export
 
 1. Go to <https://mainstream.ghan.nl/export.html>
 2. Request your data export in CSV format
 3. Download the CSV file when ready
 4. Use the CSV file path with this script
 
+### Spotify Export
+
+1. Go to your [Spotify Privacy Settings](https://www.spotify.com/account/privacy/)
+2. Scroll down to "Download your data" and request your data
+3. Select "Extended streaming history" (this can take up to 30 days)
+4. When ready, download and extract the ZIP file
+5. Use either:
+   - A single JSON file: `Streaming_History_Audio_2021-2023_0.json`
+   - The entire extracted directory (recommended)
+
+**Note**: Spotify exports include multiple JSON files. The importer automatically:
+- Reads all `Streaming_History_Audio_*.json` files in a directory
+- Filters out podcasts, audiobooks, and other non-music content
+- Combines all music tracks into a single import
+
 ## What Gets Imported
 
-Each Last.fm scrobble becomes an `fm.teal.alpha.feed.play` record with:
+Each scrobble (from Last.fm or Spotify) becomes an `fm.teal.alpha.feed.play` record with:
 
 ### Required Fields
 - **trackName**: The name of the track
-- **artists**: Array of artist objects (requires `artistName`, optional `artistMbId`)
+- **artists**: Array of artist objects (requires `artistName`, optional `artistMbId` for Last.fm)
 - **playedTime**: ISO 8601 timestamp of when you listened
-- **submissionClientAgent**: Identifies this importer (`lastfm-importer/v0.2.0`)
-- **musicServiceBaseDomain**: Always set to `last.fm`
+- **submissionClientAgent**: Identifies this importer (`lastfm-importer/v0.3.0`)
+- **musicServiceBaseDomain**: Set to `last.fm` or `spotify.com` depending on source
 
 ### Optional Fields (when available)
 - **releaseName**: Album/release name
-- **releaseMbId**: MusicBrainz release ID
-- **recordingMbId**: MusicBrainz recording/track ID
-- **originUrl**: Link to the track on Last.fm
+- **releaseMbId**: MusicBrainz release ID (Last.fm only)
+- **recordingMbId**: MusicBrainz recording/track ID (Last.fm only)
+- **originUrl**: Link to the track on Last.fm or Spotify
 
-### Example Record
+### Example Records
 
+**Last.fm Record:**
 ```json
 {
   "$type": "fm.teal.alpha.feed.play",
@@ -165,8 +194,26 @@ Each Last.fm scrobble becomes an `fm.teal.alpha.feed.play` record with:
   "recordingMbId": "3a390ad3-fe56-45f2-a073-bebc45d6bde1",
   "playedTime": "2025-11-13T23:49:36Z",
   "originUrl": "https://www.last.fm/music/Cjbeards/_/Paint+My+Masterpiece",
-  "submissionClientAgent": "lastfm-importer/v0.2.0",
+  "submissionClientAgent": "lastfm-importer/v0.3.0",
   "musicServiceBaseDomain": "last.fm"
+}
+```
+
+**Spotify Record:**
+```json
+{
+  "$type": "fm.teal.alpha.feed.play",
+  "trackName": "Don't Give Up",
+  "artists": [
+    {
+      "artistName": "Chicane"
+    }
+  ],
+  "releaseName": "Twenty",
+  "playedTime": "2021-09-09T10:34:08Z",
+  "originUrl": "https://open.spotify.com/track/3gZqDJkMZipOYCRjlHWgOV",
+  "submissionClientAgent": "lastfm-importer/v0.3.0",
+  "musicServiceBaseDomain": "spotify.com"
 }
 ```
 
@@ -285,20 +332,35 @@ npm run clean
 5. Shows clear schedule before starting
 
 ### Record Processing
-1. Parses CSV using `csv-parse` library
-2. Sorts records chronologically (or reverse if `-r` flag)
-3. Converts Last.fm format to `fm.teal.alpha.feed.play` schema
-4. Validates required fields
-5. Publishes in batches using `com.atproto.repo.applyWrites` (up to 200 records per call, the PDS maximum)
+1. Parses input file(s):
+   - **Last.fm**: CSV using `csv-parse` library
+   - **Spotify**: JSON files (single or multiple in directory)
+2. Filters data:
+   - **Spotify**: Automatically removes podcasts, audiobooks, and non-music content
+3. Converts to `fm.teal.alpha.feed.play` schema
+4. Sorts records chronologically (or reverse if `-r` flag)
+5. Generates TID-based record keys from `playedTime` for chronological ordering
+6. Validates required fields
+7. Publishes in batches using `com.atproto.repo.applyWrites` (up to 200 records per call, the PDS maximum)
 
 **Note:** The batch publishing uses `applyWrites` instead of individual `createRecord` calls for dramatically improved performance (up to 20x faster).
 
 ### Data Mapping
+
+**Last.fm:**
 - **Track info**: Direct mapping from CSV columns
 - **Timestamps**: Converts Unix timestamps to ISO 8601
 - **MusicBrainz IDs**: Preserved when present in CSV
 - **URLs**: Generated from artist/track names
 - **Artists**: Wrapped in array format with optional MBID
+
+**Spotify:**
+- **Track info**: Extracted from JSON fields
+- **Timestamps**: Already in ISO 8601 format (`ts` field)
+- **URLs**: Generated from `spotify_track_uri` field
+- **Artists**: Extracted from `master_metadata_album_artist_name`
+- **Albums**: Extracted from `master_metadata_album_album_name`
+- **Filtering**: Non-music content automatically excluded
 
 ## Lexicon Reference
 
@@ -357,4 +419,4 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Note**: This tool is for personal use. Respect Last.fm's terms of service and rate limits when exporting your data.
+**Note**: This tool is for personal use. Respect the terms of service and rate limits when exporting your data.

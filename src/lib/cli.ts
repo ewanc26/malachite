@@ -2,7 +2,8 @@ import { parseArgs } from 'node:util';
 import { AtpAgent } from '@atproto/api'; // Use AtpAgent for consistency
 import type { PlayRecord, Config, CommandLineArgs, PublishResult } from '../types.js'; 
 import { login } from './auth.js'; 
-import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js'; 
+import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js';
+import { parseSpotifyJson, convertSpotifyToPlayRecord, sortSpotifyRecords } from '../lib/spotify.js'; 
 import { publishRecordsWithApplyWrites } from './publisher.js'; 
 import { prompt } from '../utils/input.js'; 
 import config from '../config.js'; 
@@ -14,13 +15,13 @@ import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplica
  */
 export function showHelp(): void {
     console.log(`
-Last.fm to ATProto Importer v0.2.0
+Last.fm to ATProto Importer v0.3.0
 
 Usage: npm start [options]
 
 Options:
   -h, --help                     Show this help message
-  -f, --file <path>              Path to Last.fm CSV export file
+  -f, --file <path>              Path to Last.fm CSV or Spotify JSON export file/directory
   -i, --identifier <id>          ATProto handle or DID
   -p, --password <pass>          ATProto app password
   -b, --batch-size <num>         Number of records per batch (auto-calculated if not set)
@@ -29,6 +30,7 @@ Options:
   -n, --dry-run                  Preview records without publishing
   -r, --reverse-chronological    Process newest first (default: oldest first)
   -s, --sync                     Re-sync mode: check existing Teal records and only import new ones
+  --spotify                      Import from Spotify JSON export instead of Last.fm CSV
   --remove-duplicates            Remove duplicate records from Teal (keeps first occurrence)
 `);
 }
@@ -49,6 +51,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
         'dry-run': { type: 'boolean', short: 'n', default: false },
         'reverse-chronological': { type: 'boolean', short: 'r', default: false },
         sync: { type: 'boolean', short: 's', default: false },
+        spotify: { type: 'boolean', default: false },
         'remove-duplicates': { type: 'boolean', default: false },
     } as const; 
     
@@ -131,14 +134,25 @@ export async function runCLI(): Promise<void> {
         }
 
         // 2. Parse and Prepare Records
-        // This function is assumed to read the file path in args.file
-        const csvRecords = parseLastFmCsv(args.file); 
+        const useSpotify = args.spotify ?? false;
+        let records: PlayRecord[];
+        let rawRecordCount: number;
         
-        // This function maps the raw CSV records to the standardized PlayRecord structure
-        let records: PlayRecord[] = csvRecords.map(record => convertToPlayRecord(record, cfg));
+        if (useSpotify) {
+            console.log('📀 Importing from Spotify export...\n');
+            const spotifyRecords = parseSpotifyJson(args.file);
+            rawRecordCount = spotifyRecords.length;
+            records = spotifyRecords.map(record => convertSpotifyToPlayRecord(record, cfg));
+        } else {
+            console.log('📀 Importing from Last.fm CSV export...\n');
+            const csvRecords = parseLastFmCsv(args.file);
+            rawRecordCount = csvRecords.length;
+            records = csvRecords.map(record => convertToPlayRecord(record, cfg));
+        }
         
         // 2.5. Sync Mode: Fetch existing records and filter duplicates
         if (syncMode && agent) {
+            const originalRecords = [...records]; // Save before filtering
             const existingRecords = await fetchExistingRecords(agent, cfg);
             records = filterNewRecords(records, existingRecords);
             
@@ -147,13 +161,15 @@ export async function runCLI(): Promise<void> {
                 process.exit(0);
             }
             
-            displaySyncStats(csvRecords.map(r => convertToPlayRecord(r, cfg)), existingRecords, records);
+            displaySyncStats(originalRecords, existingRecords, records);
         }
         
         const totalRecords = records.length;
         
         const reverseChronological = args['reverse-chronological'] ?? false;
-        const sortedRecords = sortRecords(records, reverseChronological); 
+        const sortedRecords = useSpotify 
+            ? sortSpotifyRecords(records, reverseChronological)
+            : sortRecords(records, reverseChronological); 
         
         // 3. Determine Batching parameters
         let batchDelay = cfg.DEFAULT_BATCH_DELAY;
@@ -193,7 +209,7 @@ export async function runCLI(): Promise<void> {
         // 5. Confirmation Prompt
         if (!dryRun && !(args.yes ?? false)) {
             if (syncMode) {
-                console.log(`\nReady to publish ${totalRecords.toLocaleString()} NEW records (${csvRecords.length - totalRecords} duplicates skipped).`);
+                console.log(`\nReady to publish ${totalRecords.toLocaleString()} NEW records (${rawRecordCount - totalRecords} duplicates skipped).`);
             } else {
                 console.log(`\nReady to publish ${totalRecords.toLocaleString()} records.`);
             }
@@ -224,7 +240,7 @@ export async function runCLI(): Promise<void> {
             console.log(`\n🎉 ${syncMode ? 'Sync' : 'Import'} Complete!`);
             console.log(`Total records processed: ${result.successCount.toLocaleString()} (${result.errorCount.toLocaleString()} failed)`);
             if (syncMode) {
-                console.log(`Duplicates skipped: ${csvRecords.length - totalRecords}`);
+                console.log(`Duplicates skipped: ${rawRecordCount - totalRecords}`);
             }
         }
 
