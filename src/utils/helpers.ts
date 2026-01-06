@@ -4,6 +4,70 @@
 import type { Config } from '../types.js';
 
 /**
+ * Get user's locale from environment or default to system locale
+ */
+function getUserLocale(): string {
+  // Try to get locale from environment variables
+  const envLang = process.env.LANG?.split('.')[0] || process.env.LC_ALL?.split('.')[0];
+  
+  // Filter out invalid locales (like "C" or "POSIX")
+  if (envLang && envLang !== 'C' && envLang !== 'POSIX') {
+    return envLang;
+  }
+  
+  // Try system locale
+  try {
+    const systemLocale = Intl.DateTimeFormat().resolvedOptions().locale;
+    if (systemLocale && systemLocale !== 'C') {
+      return systemLocale;
+    }
+  } catch (e) {
+    // Ignore errors
+  }
+  
+  // Default to UK format
+  return 'en-GB';
+}
+
+/**
+ * Format a date in a locale-aware way
+ * @param date - Date string or Date object
+ * @param includeTime - Whether to include time in the output
+ * @returns Formatted date string
+ */
+export function formatDate(date: string | Date, includeTime: boolean = false): string {
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  const locale = getUserLocale();
+  
+  if (includeTime) {
+    return dateObj.toLocaleString(locale, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+  } else {
+    return dateObj.toLocaleDateString(locale, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  }
+}
+
+/**
+ * Format a date range in a locale-aware way
+ * @param startDate - Start date
+ * @param endDate - End date
+ * @returns Formatted date range string
+ */
+export function formatDateRange(startDate: string | Date, endDate: string | Date): string {
+  return `${formatDate(startDate)} to ${formatDate(endDate)}`;
+}
+
+/**
  * Format duration in human-readable format
  */
 export function formatDuration(milliseconds: number): string {
