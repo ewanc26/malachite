@@ -1,5 +1,6 @@
 import { AtpAgent } from '@atproto/api';
 import { prompt } from '../utils/input.js';
+import * as ui from '../utils/ui.js';
 
 interface ResolvedIdentity {
   did: string;
@@ -12,24 +13,29 @@ interface ResolvedIdentity {
  * Resolves an AT Protocol identifier (handle or DID) to get PDS information
  */
 async function resolveIdentifier(identifier: string): Promise<ResolvedIdentity> {
-  console.log(`Resolving identifier: ${identifier}`);
+  ui.startSpinner(`Resolving identifier: ${identifier}`);
   
-  const response = await fetch(
-    `https://slingshot.microcosm.blue/xrpc/com.bad-example.identity.resolveMiniDoc?identifier=${encodeURIComponent(identifier)}`
-  );
-  
-  if (!response.ok) {
-    throw new Error(`Failed to resolve identifier: ${response.status} ${response.statusText}`);
+  try {
+    const response = await fetch(
+      `https://slingshot.microcosm.blue/xrpc/com.bad-example.identity.resolveMiniDoc?identifier=${encodeURIComponent(identifier)}`
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Failed to resolve identifier: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json() as ResolvedIdentity;
+    
+    if (!data.did || !data.pds) {
+      throw new Error('Invalid response from identity resolver');
+    }
+    
+    ui.succeedSpinner(`Resolved to PDS: ${data.pds}`);
+    return data;
+  } catch (error) {
+    ui.failSpinner('Failed to resolve identifier');
+    throw error;
   }
-  
-  const data = await response.json() as ResolvedIdentity;
-  
-  if (!data.did || !data.pds) {
-    throw new Error('Invalid response from identity resolver');
-  }
-  
-  console.log(`✓ Resolved to PDS: ${data.pds}`);
-  return data;
 }
 
 /**
@@ -40,26 +46,29 @@ export async function login(
   password: string | undefined,
   _resolverUrl?: string // Keep parameter for backwards compatibility but don't use it
 ): Promise<AtpAgent> {
-  console.log('\n=== ATProto Login ===');
+  ui.header('ATProto Login');
   
   // Prompt for missing credentials
   if (!identifier) {
     identifier = await prompt('Handle or DID: ');
   } else {
-    console.log(`Handle or DID: ${identifier}`);
+    ui.keyValue('Handle or DID', identifier);
   }
   
   if (!password) {
     password = await prompt('App password: ', true);
   } else {
-    console.log('App password: [hidden]');
+    ui.keyValue('App password', '[hidden]');
   }
+  
+  console.log('');
   
   try {
     // Resolve the identifier to get PDS and other info
     const resolved = await resolveIdentifier(identifier);
     
     // Initialize the agent with the resolved PDS URL
+    ui.startSpinner('Logging in...');
     const agent = new AtpAgent({
       service: resolved.pds,
     });
@@ -70,14 +79,15 @@ export async function login(
       password: password,
     });
     
-    console.log('✓ Logged in successfully!');
-    console.log(`  DID: ${agent.session?.did}`);
-    console.log(`  Handle: ${agent.session?.handle}\n`);
+    ui.succeedSpinner('Logged in successfully!');
+    ui.keyValue('DID', agent.session?.did || 'unknown');
+    ui.keyValue('Handle', agent.session?.handle || 'unknown');
+    console.log('');
     
     return agent;
   } catch (error) {
     const err = error as Error;
-    console.error('✗ Login failed:', err.message);
+    ui.failSpinner('Login failed');
     
     // Provide more specific error messages
     if (err.message.includes('Failed to resolve identifier')) {
