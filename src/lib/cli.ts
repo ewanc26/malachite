@@ -3,18 +3,18 @@ import { AtpAgent } from '@atproto/api'; // Use AtpAgent for consistency
 import type { PlayRecord, Config, CommandLineArgs, PublishResult } from '../types.js'; 
 import { login } from './auth.js'; 
 import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js'; 
-import { publishRecordsWithApplyWrites } from './publisher-applywrites.js'; 
+import { publishRecordsWithApplyWrites } from './publisher.js'; 
 import { prompt } from '../utils/input.js'; 
 import config from '../config.js'; 
 import { calculateOptimalBatchSize, showRateLimitInfo } from '../utils/helpers.js';
-import { fetchExistingRecords, filterNewRecords, displaySyncStats } from './sync.js'; 
+import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates } from './sync.js'; 
 
 /**
  * Show help message
  */
 export function showHelp(): void {
     console.log(`
-Last.fm to ATProto Importer v0.1.0
+Last.fm to ATProto Importer v0.2.0
 
 Usage: npm start [options]
 
@@ -24,11 +24,12 @@ Options:
   -i, --identifier <id>          ATProto handle or DID
   -p, --password <pass>          ATProto app password
   -b, --batch-size <num>         Number of records per batch (auto-calculated if not set)
-  -d, --batch-delay <ms>         Delay between batches in ms (default: 2000, min: 1000)
+  -d, --batch-delay <ms>         Delay between batches in ms (default: 500, min: 500)
   -y, --yes                      Skip confirmation prompt
   -n, --dry-run                  Preview records without publishing
   -r, --reverse-chronological    Process newest first (default: oldest first)
   -s, --sync                     Re-sync mode: check existing Teal records and only import new ones
+  --remove-duplicates            Remove duplicate records from Teal (keeps first occurrence)
 `);
 }
 
@@ -48,6 +49,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
         'dry-run': { type: 'boolean', short: 'n', default: false },
         'reverse-chronological': { type: 'boolean', short: 'r', default: false },
         sync: { type: 'boolean', short: 's', default: false },
+        'remove-duplicates': { type: 'boolean', default: false },
     } as const; 
     
     try {
@@ -80,7 +82,44 @@ export async function runCLI(): Promise<void> {
 
         const dryRun = args['dry-run'] ?? false;
         const syncMode = args.sync ?? false;
+        const removeDuplicatesMode = args['remove-duplicates'] ?? false;
         let agent: AtpAgent | null = null;
+
+        // Remove duplicates mode - requires authentication but not file
+        if (removeDuplicatesMode) {
+            if (!args.identifier || !args.password) {
+                throw new Error('Missing required arguments for login: -i (identifier) and -p (password)');
+            }
+            
+            agent = await login(args.identifier, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+            
+            // Check for duplicates first
+            const result = await removeDuplicates(agent, cfg, true); // Always dry-run first to show info
+            
+            if (result.totalDuplicates === 0) {
+                return; // No duplicates, exit early
+            }
+            
+            // Ask for confirmation if not in dry-run mode
+            if (!dryRun && !(args.yes ?? false)) {
+                console.log(`⚠️  WARNING: This will permanently delete ${result.totalDuplicates} duplicate records from Teal.`);
+                console.log('   The first occurrence of each duplicate will be kept.\n');
+                const answer = await prompt('Are you sure you want to continue? (y/N) ');
+                if (answer.toLowerCase() !== 'y') {
+                    console.log('Duplicate removal cancelled by user.');
+                    process.exit(0);
+                }
+                
+                // Actually remove duplicates
+                await removeDuplicates(agent, cfg, false);
+                console.log('🎉 Duplicate removal complete!\n');
+            } else if (dryRun) {
+                console.log('DRY RUN: No records were actually removed.\n');
+                console.log('Remove --dry-run flag to actually delete duplicates.\n');
+            }
+            
+            return;
+        }
 
         // 1. Get Authentication (required for sync mode, even in dry-run)
         if (!dryRun || syncMode) {
