@@ -1,5 +1,5 @@
 import type { AtpAgent } from '@atproto/api';
-import { formatDuration } from '../utils/helpers.js';
+import { formatDuration, formatDate } from '../utils/helpers.js';
 import { isImportCancelled } from '../utils/killswitch.js';
 import {
   calculateDailySchedule,
@@ -10,199 +10,181 @@ import {
 import type { PlayRecord, Config, PublishResult } from '../types.js';
 
 /**
- * Publish records in batches with rate limiting and multi-day support
+ * Maximum operations allowed per applyWrites call
+ * PDS allows up to 200 operations per call. Each create operation costs 3 rate limit points.
+ * We use the full limit for maximum performance.
+ * See: https://github.com/bluesky-social/atproto/blob/main/packages/pds/src/api/com/atproto/repo/applyWrites.ts
  */
-export async function publishRecords(
+const MAX_APPLY_WRITES_OPS = 200;
+
+/**
+ * Publish records using com.atproto.repo.applyWrites for efficient batching
+ * with adaptive rate limiting
+ */
+export async function publishRecordsWithApplyWrites(
   agent: AtpAgent | null,
   records: PlayRecord[],
   batchSize: number,
   batchDelay: number,
   config: Config,
-  dryRun = false
+  dryRun = false,
+  syncMode = false
 ): Promise<PublishResult> {
   const { RECORD_TYPE } = config;
   const totalRecords = records.length;
 
   if (dryRun) {
-    return handleDryRun(records, batchSize, batchDelay, config);
+    return handleDryRun(records, batchSize, batchDelay, config, syncMode);
   }
 
   if (!agent) {
     throw new Error('Agent is required for publishing');
   }
 
-  // Calculate rate-limited batch parameters
-  const rateLimitParams = calculateRateLimitedBatches(totalRecords, config);
+  // Start with aggressive settings
+  let currentBatchSize = Math.min(batchSize, MAX_APPLY_WRITES_OPS);
+  let currentBatchDelay = batchDelay;
+  
+  // Adaptive rate limiting state
+  let consecutiveSuccesses = 0;
+  let consecutiveFailures = 0;
+  const MAX_CONSECUTIVE_FAILURES = 3;
 
-  // Override with calculated parameters if rate limiting is needed
-  if (rateLimitParams.needsRateLimiting) {
-    displayRateLimitWarning();
-    batchSize = rateLimitParams.batchSize;
-    batchDelay = rateLimitParams.batchDelay;
-  }
-
-  displayRateLimitInfo(
-    totalRecords,
-    batchSize,
-    batchDelay,
-    rateLimitParams.estimatedDays,
-    rateLimitParams.recordsPerDay
-  );
-
-  // Calculate daily schedule if multi-day import
-  const dailySchedule =
-    rateLimitParams.estimatedDays > 1
-      ? calculateDailySchedule(
-          totalRecords,
-          batchSize,
-          batchDelay,
-          rateLimitParams.recordsPerDay
-        )
-      : null;
+  console.log(`\n🚀 Starting adaptive import with aggressive settings...`);
+  console.log(`   Initial batch size: ${currentBatchSize} records`);
+  console.log(`   Initial delay: ${currentBatchDelay}ms`);
+  console.log(`   Will automatically adjust based on server response\n`);
 
   let successCount = 0;
   let errorCount = 0;
   const startTime = Date.now();
 
-  const totalBatches = Math.ceil(totalRecords / batchSize);
-  const estimatedTime = formatDuration(totalBatches * batchDelay);
-
-  console.log(`Publishing ${totalRecords} records in batches of ${batchSize}...`);
-  console.log(`Total batches: ${totalBatches}`);
-  if (!dailySchedule) {
-    console.log(`Estimated time: ${estimatedTime}`);
-  }
+  console.log(`Publishing ${totalRecords} records using adaptive batching...`);
   console.log(`\n🚨 Press Ctrl+C to stop gracefully after current batch\n`);
 
-  // If multi-day, process day by day
-  if (dailySchedule) {
-    for (const day of dailySchedule) {
-      console.log(`\n╔═══════════════════════════════════════════════════════════════╗`);
-      console.log(`║  DAY ${day.day} of ${rateLimitParams.estimatedDays}`);
-      console.log(`║  Records: ${day.recordsStart + 1}-${day.recordsEnd} (${day.recordsCount} total)`);
-      console.log(`╚═══════════════════════════════════════════════════════════════╝\n`);
-
-      const dayRecords = records.slice(day.recordsStart, day.recordsEnd);
-      const result = await processDayBatch(
-        agent,
-        dayRecords,
-        batchSize,
-        batchDelay,
-        RECORD_TYPE,
-        day.recordsStart,
-        totalRecords,
-        startTime
-      );
-
-      successCount += result.successCount;
-      errorCount += result.errorCount;
-
-      if (result.cancelled) {
-        return { successCount, errorCount, cancelled: true };
-      }
-
-      // Pause between days
-      if (day.pauseAfter) {
-        console.log(`\n⏸️  Pausing for 24 hours before continuing...`);
-        console.log(`   Next batch will start at: ${new Date(Date.now() + day.pauseDuration).toLocaleString()}`);
-        console.log(`   Progress: ${successCount}/${totalRecords} records completed\n`);
-        console.log(`   💡 You can safely stop (Ctrl+C) and restart later.\n`);
-
-        await new Promise((resolve) => setTimeout(resolve, day.pauseDuration));
-      }
-    }
-  } else {
-    // Single day import - process normally
-    const result = await processDayBatch(
-      agent,
-      records,
-      batchSize,
-      batchDelay,
-      RECORD_TYPE,
-      0,
-      totalRecords,
-      startTime
-    );
-
-    successCount = result.successCount;
-    errorCount = result.errorCount;
-
-    if (result.cancelled) {
-      return { successCount, errorCount, cancelled: true };
-    }
-  }
-
-  return { successCount, errorCount, cancelled: false };
-}
-
-/**
- * Process a batch of records (for a single day or entire import)
- */
-async function processDayBatch(
-  agent: AtpAgent,
-  records: PlayRecord[],
-  batchSize: number,
-  batchDelay: number,
-  recordType: string,
-  globalOffset: number,
-  totalRecords: number,
-  startTime: number
-): Promise<PublishResult> {
-  let successCount = 0;
-  let errorCount = 0;
-
-  for (let i = 0; i < records.length; i += batchSize) {
+  let i = 0;
+  while (i < totalRecords) {
     // Check killswitch before processing batch
     if (isImportCancelled()) {
       return handleCancellation(successCount, errorCount, totalRecords);
     }
 
-    const batch = records.slice(i, i + batchSize);
-    const globalIndex = globalOffset + i;
-    const batchNum = Math.floor(globalIndex / batchSize) + 1;
-    const progress = (((globalOffset + i) / totalRecords) * 100).toFixed(1);
+    const batch = records.slice(i, Math.min(i + currentBatchSize, totalRecords));
+    const batchNum = Math.floor(i / currentBatchSize) + 1;
+    const progress = ((i / totalRecords) * 100).toFixed(1);
 
     console.log(
-      `[${progress}%] Batch ${batchNum} (records ${globalOffset + i + 1}-${Math.min(globalOffset + i + batchSize, globalOffset + records.length)})`
+      `[${progress}%] Batch ${batchNum} (records ${i + 1}-${Math.min(i + currentBatchSize, totalRecords)}) [size: ${currentBatchSize}, delay: ${currentBatchDelay}ms]`
     );
 
-    // Process batch records
     const batchStartTime = Date.now();
-    for (const record of batch) {
-      // Check killswitch during batch processing
-      if (isImportCancelled()) {
-        console.log(`  ⚠️  Stopping mid-batch...`);
-        break;
+
+    // Build writes array for applyWrites
+    const writes = batch.map((record) => ({
+      $type: 'com.atproto.repo.applyWrites#create',
+      collection: RECORD_TYPE,
+      value: record,
+    }));
+
+    try {
+      // Call applyWrites with the batch
+      const response = await agent.com.atproto.repo.applyWrites({
+        repo: agent.session?.did || '',
+        writes: writes as any,
+      });
+
+      // Success!
+      const batchSuccessCount = response.data.results?.length || batch.length;
+      successCount += batchSuccessCount;
+      consecutiveSuccesses++;
+      consecutiveFailures = 0;
+
+      const batchDuration = Date.now() - batchStartTime;
+      console.log(
+        `  ✓ Complete in ${batchDuration}ms (${batchSuccessCount} successful)`
+      );
+
+      // Speed up if we're doing well (after 5 consecutive successes)
+      if (consecutiveSuccesses >= 5 && currentBatchDelay > config.MIN_BATCH_DELAY) {
+        const oldDelay = currentBatchDelay;
+        currentBatchDelay = Math.max(
+          config.MIN_BATCH_DELAY,
+          Math.floor(currentBatchDelay * 0.8)
+        );
+        if (oldDelay !== currentBatchDelay) {
+          console.log(`  ⚡ Speeding up! Delay: ${oldDelay}ms → ${currentBatchDelay}ms`);
+        }
+        consecutiveSuccesses = 0;
       }
 
-      try {
-        await agent.com.atproto.repo.createRecord({
-          repo: agent.session?.did || '',
-          collection: recordType,
-          record,
+      i += batch.length;
+
+    } catch (error) {
+      const err = error as any;
+      const isRateLimitError = 
+        err.status === 429 || 
+        err.message?.includes('rate limit') ||
+        err.message?.includes('too many requests');
+
+      consecutiveFailures++;
+      consecutiveSuccesses = 0;
+
+      if (isRateLimitError) {
+        console.error(`  ⚠️  Rate limit hit! Backing off...`);
+        
+        // Exponential backoff
+        const backoffMultiplier = Math.pow(2, consecutiveFailures);
+        currentBatchDelay = Math.min(
+          currentBatchDelay * backoffMultiplier,
+          60000 // Max 60 seconds
+        );
+        
+        // Also reduce batch size
+        currentBatchSize = Math.max(
+          Math.floor(currentBatchSize / 2),
+          10 // Minimum 10 records
+        );
+
+        console.log(`  📉 Adjusted: batch size → ${currentBatchSize}, delay → ${currentBatchDelay}ms`);
+        console.log(`  ⏳ Waiting ${currentBatchDelay}ms before retry...`);
+        
+        await new Promise((resolve) => setTimeout(resolve, currentBatchDelay));
+        
+        // Don't advance i, retry this batch
+        continue;
+        
+      } else {
+        // Other error - log and continue
+        errorCount += batch.length;
+        console.error(`  ✗ Batch failed: ${err.message}`);
+        
+        // Log failed records
+        batch.slice(0, 3).forEach((record) => {
+          console.error(`     - ${record.trackName} by ${record.artists[0]?.artistName}`);
         });
-        successCount++;
-      } catch (error) {
-        errorCount++;
-        const err = error as Error;
-        console.error(`  ✗ Failed: ${record.trackName} - ${err.message}`);
+        if (batch.length > 3) {
+          console.error(`     ... and ${batch.length - 3} more`);
+        }
+
+        // If too many consecutive failures, slow down
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          currentBatchDelay = Math.min(currentBatchDelay * 2, 10000);
+          currentBatchSize = Math.max(Math.floor(currentBatchSize / 2), 10);
+          console.log(`  📉 Multiple failures: adjusted to ${currentBatchSize} records, ${currentBatchDelay}ms delay`);
+        }
+        
+        i += batch.length; // Skip failed batch
       }
     }
 
-    const batchDuration = Date.now() - batchStartTime;
     const elapsed = formatDuration(Date.now() - startTime);
-    const remaining = formatDuration(
-      ((totalRecords - (globalOffset + i + batchSize)) / batchSize) * batchDelay
-    );
-
+    const recordsPerSecond = successCount / ((Date.now() - startTime) / 1000);
+    const remainingRecords = totalRecords - i;
+    const estimatedRemaining = remainingRecords / Math.max(recordsPerSecond, 1);
+    
     console.log(
-      `  ✓ Complete in ${batchDuration}ms (${successCount} successful, ${errorCount} failed)`
+      `  ⏱  Elapsed: ${elapsed} | Speed: ${recordsPerSecond.toFixed(1)} rec/s | Remaining: ~${formatDuration(estimatedRemaining * 1000)}\n`
     );
-
-    // Only show time estimates if not cancelled
-    if (!isImportCancelled()) {
-      console.log(`  ⏱  Elapsed: ${elapsed} | Remaining: ~${remaining}\n`);
-    }
 
     // Check again before waiting
     if (isImportCancelled()) {
@@ -210,13 +192,15 @@ async function processDayBatch(
     }
 
     // Wait before next batch (except for last batch)
-    if (i + batchSize < records.length) {
-      await new Promise((resolve) => setTimeout(resolve, batchDelay));
+    if (i < totalRecords) {
+      await new Promise((resolve) => setTimeout(resolve, currentBatchDelay));
     }
   }
 
   return { successCount, errorCount, cancelled: false };
 }
+
+
 
 /**
  * Handle dry run mode
@@ -225,7 +209,8 @@ function handleDryRun(
   records: PlayRecord[],
   batchSize: number,
   batchDelay: number,
-  config: Config
+  config: Config,
+  syncMode: boolean
 ): PublishResult {
   const totalRecords = records.length;
 
@@ -236,6 +221,9 @@ function handleDryRun(
     displayRateLimitWarning();
     batchSize = rateLimitParams.batchSize;
     batchDelay = rateLimitParams.batchDelay;
+
+    // Ensure batch size doesn't exceed applyWrites limit
+    batchSize = Math.min(batchSize, MAX_APPLY_WRITES_OPS);
 
     displayRateLimitInfo(
       totalRecords,
@@ -265,8 +253,12 @@ function handleDryRun(
     }
   }
 
-  console.log(`\n=== DRY RUN MODE ===`);
-  console.log(`Would publish ${totalRecords} records in batches of ${batchSize}`);
+  console.log(`\n=== DRY RUN MODE ${syncMode ? '(SYNC)' : ''} ===`);
+  if (syncMode) {
+    console.log(`Sync mode enabled: Only new records will be published`);
+  }
+  console.log(`Would publish ${totalRecords} records using applyWrites`);
+  console.log(`Batch size: ${Math.min(batchSize, MAX_APPLY_WRITES_OPS)} records per applyWrites call`);
 
   if (rateLimitParams.estimatedDays > 1) {
     console.log(
@@ -284,7 +276,7 @@ function handleDryRun(
     const record = records[i];
     console.log(`${i + 1}. ${record.artists[0]?.artistName} - ${record.trackName}`);
     console.log(`   Album: ${record.releaseName || 'N/A'}`);
-    console.log(`   Played: ${record.playedTime}`);
+    console.log(`   Played: ${formatDate(record.playedTime, true)}`);
     console.log(`   URL: ${record.originUrl}`);
 
     // Show MusicBrainz IDs if available
