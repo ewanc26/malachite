@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { parse } from 'csv-parse/sync';
 import type { LastFmCsvRecord, PlayRecord, Config } from '../types.js';
+import { formatDate } from '../utils/helpers.js';
 
 /**
  * Parse Last.fm CSV export
@@ -8,13 +9,13 @@ import type { LastFmCsvRecord, PlayRecord, Config } from '../types.js';
 export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
   console.log(`Reading CSV file: ${filePath}`);
   const fileContent = fs.readFileSync(filePath, 'utf-8');
-  
+
   const records = parse(fileContent, {
     columns: true,
     skip_empty_lines: true,
     trim: true,
   }) as LastFmCsvRecord[];
-  
+
   console.log(`✓ Parsed ${records.length} scrobbles\n`);
   return records;
 }
@@ -24,11 +25,11 @@ export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
  */
 export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config): PlayRecord {
   const { RECORD_TYPE, CLIENT_AGENT } = config;
-  
+
   // Parse the timestamp
   const timestamp = parseInt(csvRecord.uts);
   const playedTime = new Date(timestamp * 1000).toISOString();
-  
+
   // Build artists array
   const artists: PlayRecord['artists'] = [];
   if (csvRecord.artist) {
@@ -40,7 +41,7 @@ export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config):
     }
     artists.push(artistData);
   }
-  
+
   // Build the play record
   const playRecord: PlayRecord = {
     $type: RECORD_TYPE,
@@ -51,25 +52,25 @@ export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config):
     musicServiceBaseDomain: 'last.fm',
     originUrl: '',
   };
-  
+
   // Add optional fields
   if (csvRecord.album && csvRecord.album.trim()) {
     playRecord.releaseName = csvRecord.album;
   }
-  
+
   if (csvRecord.album_mbid && csvRecord.album_mbid.trim()) {
     playRecord.releaseMbId = csvRecord.album_mbid;
   }
-  
+
   if (csvRecord.track_mbid && csvRecord.track_mbid.trim()) {
     playRecord.recordingMbId = csvRecord.track_mbid;
   }
-  
+
   // Generate Last.fm URL
   const artistEncoded = encodeURIComponent(csvRecord.artist);
   const trackEncoded = encodeURIComponent(csvRecord.track);
   playRecord.originUrl = `https://www.last.fm/music/${artistEncoded}/_/${trackEncoded}`;
-  
+
   return playRecord;
 }
 
@@ -78,18 +79,18 @@ export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config):
  */
 export function sortRecords(records: PlayRecord[], reverseChronological = false): PlayRecord[] {
   console.log(`Sorting records ${reverseChronological ? 'newest' : 'oldest'} first...`);
-  
+
   records.sort((a, b) => {
     const timeA = new Date(a.playedTime).getTime();
     const timeB = new Date(b.playedTime).getTime();
     return reverseChronological ? timeB - timeA : timeA - timeB;
   });
-  
-  const firstPlay = new Date(records[0].playedTime).toLocaleDateString();
-  const lastPlay = new Date(records[records.length - 1].playedTime).toLocaleDateString();
+
+  const firstPlay = formatDate(records[0].playedTime);
+  const lastPlay = formatDate(records[records.length - 1].playedTime);
   console.log(`✓ Sorted ${records.length} records`);
   console.log(`  First: ${firstPlay}`);
   console.log(`  Last: ${lastPlay}\n`);
-  
+
   return records;
 }
