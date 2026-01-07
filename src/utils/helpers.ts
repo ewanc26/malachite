@@ -8,13 +8,15 @@ import type { Config } from '../types.js';
  */
 function getUserLocale(): string {
   // Try to get locale from environment variables
-  const envLang = process.env.LANG?.split('.')[0] || process.env.LC_ALL?.split('.')[0];
-  
+  const envLang = process.env.LANG?.split('.')[0] ||
+    process.env.LC_ALL?.split('.')[0];
+
   // Filter out invalid locales (like "C" or "POSIX")
   if (envLang && envLang !== 'C' && envLang !== 'POSIX') {
-    return envLang;
+    // FIX: Replace underscore with hyphen to satisfy BCP 47 (e.g., en_GB -> en-GB) [cite: 413, 414]
+    return envLang.replace('_', '-');
   }
-  
+
   // Try system locale
   try {
     const systemLocale = Intl.DateTimeFormat().resolvedOptions().locale;
@@ -24,7 +26,7 @@ function getUserLocale(): string {
   } catch (e) {
     // Ignore errors
   }
-  
+
   // Default to UK format
   return 'en-GB';
 }
