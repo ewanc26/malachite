@@ -9,6 +9,7 @@ import {
 } from '../utils/rate-limiter.js';
 import { generateTIDFromISO } from '../utils/tid.js';
 import type { PlayRecord, Config, PublishResult } from '../types.js';
+import { log } from '../utils/logger.js';
 
 /**
  * Maximum operations allowed per applyWrites call
@@ -51,17 +52,18 @@ export async function publishRecordsWithApplyWrites(
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
 
-  console.log(`\n🚀 Starting adaptive import with aggressive settings...`);
-  console.log(`   Initial batch size: ${currentBatchSize} records`);
-  console.log(`   Initial delay: ${currentBatchDelay}ms`);
-  console.log(`   Will automatically adjust based on server response\n`);
+  log.section('Adaptive Import');
+  log.info(`Initial batch size: ${currentBatchSize} records`);
+  log.info(`Initial delay: ${currentBatchDelay}ms`);
+  log.info(`Will automatically adjust based on server response`);
+  log.blank();
+  log.info(`Publishing ${totalRecords.toLocaleString()} records using adaptive batching...`);
+  log.warn('Press Ctrl+C to stop gracefully after current batch');
+  log.blank();
 
   let successCount = 0;
   let errorCount = 0;
   const startTime = Date.now();
-
-  console.log(`Publishing ${totalRecords} records using adaptive batching...`);
-  console.log(`\n🚨 Press Ctrl+C to stop gracefully after current batch\n`);
 
   let i = 0;
   while (i < totalRecords) {
@@ -74,7 +76,7 @@ export async function publishRecordsWithApplyWrites(
     const batchNum = Math.floor(i / currentBatchSize) + 1;
     const progress = ((i / totalRecords) * 100).toFixed(1);
 
-    console.log(
+    log.progress(
       `[${progress}%] Batch ${batchNum} (records ${i + 1}-${Math.min(i + currentBatchSize, totalRecords)}) [size: ${currentBatchSize}, delay: ${currentBatchDelay}ms]`
     );
 
@@ -102,9 +104,7 @@ export async function publishRecordsWithApplyWrites(
       consecutiveFailures = 0;
 
       const batchDuration = Date.now() - batchStartTime;
-      console.log(
-        `  ✓ Complete in ${batchDuration}ms (${batchSuccessCount} successful)`
-      );
+      log.debug(`Batch complete in ${batchDuration}ms (${batchSuccessCount} successful)`);
 
       // Speed up if we're doing well (after 5 consecutive successes)
       if (consecutiveSuccesses >= 5 && currentBatchDelay > config.MIN_BATCH_DELAY) {
@@ -114,7 +114,7 @@ export async function publishRecordsWithApplyWrites(
           Math.floor(currentBatchDelay * 0.8)
         );
         if (oldDelay !== currentBatchDelay) {
-          console.log(`  ⚡ Speeding up! Delay: ${oldDelay}ms → ${currentBatchDelay}ms`);
+          log.info(`⚡ Speeding up! Delay: ${oldDelay}ms → ${currentBatchDelay}ms`);
         }
         consecutiveSuccesses = 0;
       }
@@ -132,7 +132,7 @@ export async function publishRecordsWithApplyWrites(
       consecutiveSuccesses = 0;
 
       if (isRateLimitError) {
-        console.error(`  ⚠️  Rate limit hit! Backing off...`);
+        log.warn('Rate limit hit! Backing off...');
         
         // Exponential backoff
         const backoffMultiplier = Math.pow(2, consecutiveFailures);
@@ -147,8 +147,8 @@ export async function publishRecordsWithApplyWrites(
           10 // Minimum 10 records
         );
 
-        console.log(`  📉 Adjusted: batch size → ${currentBatchSize}, delay → ${currentBatchDelay}ms`);
-        console.log(`  ⏳ Waiting ${currentBatchDelay}ms before retry...`);
+        log.info(`📉 Adjusted: batch size → ${currentBatchSize}, delay → ${currentBatchDelay}ms`);
+        log.info(`⏳ Waiting ${currentBatchDelay}ms before retry...`);
         
         await new Promise((resolve) => setTimeout(resolve, currentBatchDelay));
         
@@ -158,21 +158,21 @@ export async function publishRecordsWithApplyWrites(
       } else {
         // Other error - log and continue
         errorCount += batch.length;
-        console.error(`  ✗ Batch failed: ${err.message}`);
+        log.error(`Batch failed: ${err.message}`);
         
         // Log failed records
         batch.slice(0, 3).forEach((record) => {
-          console.error(`     - ${record.trackName} by ${record.artists[0]?.artistName}`);
+          log.debug(`Failed: ${record.trackName} by ${record.artists[0]?.artistName}`);
         });
         if (batch.length > 3) {
-          console.error(`     ... and ${batch.length - 3} more`);
+          log.debug(`... and ${batch.length - 3} more failed`);
         }
 
         // If too many consecutive failures, slow down
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
           currentBatchDelay = Math.min(currentBatchDelay * 2, 10000);
           currentBatchSize = Math.max(Math.floor(currentBatchSize / 2), 10);
-          console.log(`  📉 Multiple failures: adjusted to ${currentBatchSize} records, ${currentBatchDelay}ms delay`);
+          log.warn(`📉 Multiple failures: adjusted to ${currentBatchSize} records, ${currentBatchDelay}ms delay`);
         }
         
         i += batch.length; // Skip failed batch
@@ -184,9 +184,10 @@ export async function publishRecordsWithApplyWrites(
     const remainingRecords = totalRecords - i;
     const estimatedRemaining = remainingRecords / Math.max(recordsPerSecond, 1);
     
-    console.log(
-      `  ⏱  Elapsed: ${elapsed} | Speed: ${recordsPerSecond.toFixed(1)} rec/s | Remaining: ~${formatDuration(estimatedRemaining * 1000)}\n`
+    log.debug(
+      `Elapsed: ${elapsed} | Speed: ${recordsPerSecond.toFixed(1)} rec/s | Remaining: ~${formatDuration(estimatedRemaining * 1000)}`
     );
+    log.blank();
 
     // Check again before waiting
     if (isImportCancelled()) {
@@ -236,71 +237,90 @@ function handleDryRun(
     );
 
     if (rateLimitParams.estimatedDays > 1) {
-      const dailySchedule = calculateDailySchedule(
-        totalRecords,
-        batchSize,
-        batchDelay,
-        rateLimitParams.recordsPerDay
-      );
+      // Only show daily schedule in verbose/debug mode
+      if (log.getLevel() <= 0) { // DEBUG level
+        const dailySchedule = calculateDailySchedule(
+          totalRecords,
+          batchSize,
+          batchDelay,
+          rateLimitParams.recordsPerDay
+        );
 
-      console.log('📅 Multi-Day Import Schedule:\n');
-      dailySchedule.forEach((day) => {
-        console.log(`   Day ${day.day}:`);
-        console.log(`     Records ${day.recordsStart + 1}-${day.recordsEnd} (${day.recordsCount} total)`);
-        if (day.pauseAfter) {
-          console.log(`     → Pause 24h after completion`);
-        }
-      });
-      console.log('');
+        console.log('📅 Multi-Day Import Schedule:\n');
+        dailySchedule.forEach((day) => {
+          console.log(`   Day ${day.day}:`);
+          console.log(`     Records ${day.recordsStart + 1}-${day.recordsEnd} (${day.recordsCount} total)`);
+          if (day.pauseAfter) {
+            console.log(`     → Pause 24h after completion`);
+          }
+        });
+        console.log('');
+      }
     }
   }
 
-  console.log(`\n=== DRY RUN MODE ${syncMode ? '(SYNC)' : ''} ===`);
+  log.section(`DRY RUN MODE ${syncMode ? '(SYNC)' : ''}`);
   if (syncMode) {
-    console.log(`Sync mode enabled: Only new records will be published`);
+    log.info('Sync mode: Only new records will be published');
   }
-  console.log(`Would publish ${totalRecords} records using applyWrites`);
-  console.log(`Batch size: ${Math.min(batchSize, MAX_APPLY_WRITES_OPS)} records per applyWrites call`);
-
+  log.info(`Total: ${totalRecords.toLocaleString()} records`);
+  log.info(`Batch: ${Math.min(batchSize, MAX_APPLY_WRITES_OPS)} records per call`);
+  
   if (rateLimitParams.estimatedDays > 1) {
-    console.log(
-      `Import would span ${rateLimitParams.estimatedDays} days with automatic pauses\n`
-    );
+    log.info(`Duration: ${rateLimitParams.estimatedDays} days with automatic pauses`);
   } else {
-    console.log(`Estimated time: ${formatDuration(Math.ceil(totalRecords / batchSize) * batchDelay)}\n`);
+    log.info(`Time: ~${formatDuration(Math.ceil(totalRecords / batchSize) * batchDelay)}`);
   }
+  log.blank();
 
   // Show first 5 records as preview
   const previewCount = Math.min(5, totalRecords);
-  console.log(`Preview of first ${previewCount} records (in processing order):\n`);
+  log.info(`Preview (first ${previewCount} records):`);
+  log.blank();
 
   for (let i = 0; i < previewCount; i++) {
     const record = records[i];
-    console.log(`${i + 1}. ${record.artists[0]?.artistName} - ${record.trackName}`);
-    console.log(`   Album: ${record.releaseName || 'N/A'}`);
-    console.log(`   Played: ${formatDate(record.playedTime, true)}`);
-    console.log(`   URL: ${record.originUrl}`);
-
-    // Show MusicBrainz IDs if available
-    const mbids = [];
-    if (record.artists[0]?.artistMbId)
-      mbids.push(`Artist: ${record.artists[0].artistMbId}`);
-    if (record.recordingMbId) mbids.push(`Recording: ${record.recordingMbId}`);
-    if (record.releaseMbId) mbids.push(`Release: ${record.releaseMbId}`);
-
-    if (mbids.length > 0) {
-      console.log(`   MBIDs: ${mbids.join(', ')}`);
+    const artistName = record.artists[0]?.artistName || 'Unknown Artist';
+    
+    log.raw(`${i + 1}. ${artistName} - ${record.trackName}`);
+    
+    // Album/Release
+    if (record.releaseName) {
+      log.raw(`   Album: ${record.releaseName}`);
     }
-    console.log('');
+    
+    // Timestamp
+    log.raw(`   Played: ${formatDate(record.playedTime, true)}`);
+    
+    // Source and URL
+    log.raw(`   Source: ${record.musicServiceBaseDomain}`);
+    log.raw(`   URL: ${record.originUrl}`);
+    
+    // MusicBrainz IDs (if available)
+    const mbids: string[] = [];
+    if (record.artists[0]?.artistMbId) mbids.push(`Artist: ${record.artists[0].artistMbId}`);
+    if (record.recordingMbId) mbids.push(`Track: ${record.recordingMbId}`);
+    if (record.releaseMbId) mbids.push(`Album: ${record.releaseMbId}`);
+    
+    if (mbids.length > 0) {
+      log.raw(`   MusicBrainz IDs: ${mbids.join(', ')}`);
+    }
+    
+    // Record metadata
+    log.raw(`   Record Type: ${record.$type}`);
+    log.raw(`   Client: ${record.submissionClientAgent}`);
+    
+    log.blank();
   }
 
   if (totalRecords > previewCount) {
-    console.log(`... and ${totalRecords - previewCount} more records\n`);
+    log.info(`... and ${(totalRecords - previewCount).toLocaleString()} more records`);
+    log.blank();
   }
 
-  console.log('=== DRY RUN COMPLETE ===');
-  console.log('No records were actually published.');
-  console.log('Remove --dry-run flag to publish for real.\n');
+  log.section('DRY RUN COMPLETE');
+  log.info('No records were published.');
+  log.info('Remove --dry-run to publish for real.');
 
   return { successCount: totalRecords, errorCount: 0, cancelled: false };
 }
@@ -313,8 +333,9 @@ function handleCancellation(
   errorCount: number,
   totalRecords: number
 ): PublishResult {
-  console.log(`\n🛑 Import cancelled by user`);
-  console.log(`   Processed: ${successCount}/${totalRecords} records`);
-  console.log(`   Remaining: ${totalRecords - successCount} records\n`);
+  log.blank();
+  log.warn('Import cancelled by user');
+  log.info(`Processed: ${successCount.toLocaleString()}/${totalRecords.toLocaleString()} records`);
+  log.info(`Remaining: ${(totalRecords - successCount).toLocaleString()} records`);
   return { successCount, errorCount, cancelled: true };
 }

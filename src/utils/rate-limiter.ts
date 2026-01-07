@@ -127,18 +127,13 @@ export function formatTimeRemaining(ms: number): string {
  * Display rate limit warning
  */
 export function displayRateLimitWarning(): void {
-  console.log('\n⚠️  ═══════════════════════════════════════════════════════════════════════════════');
-  console.log('⚠️  IMPORTANT: Bluesky AppView Rate Limits');
-  console.log('⚠️  ═══════════════════════════════════════════════════════════════════════════════');
-  console.log('⚠️');
-  console.log('⚠️  Exceeding 10K records per day can rate limit your ENTIRE PDS on Bluesky\'s');
-  console.log('⚠️  AppView. This affects ALL users on your PDS, not just your account!');
-  console.log('⚠️');
-  console.log('⚠️  This importer automatically limits imports to 1K records per day by default');
-  console.log('⚠️  with automatic batching and pauses to stay within safe limits.');
-  console.log('⚠️');
-  console.log('⚠️  See: https://docs.bsky.app/blog/rate-limits-pds-v3');
-  console.log('⚠️  ═══════════════════════════════════════════════════════════════════════════════\n');
+  console.log('');
+  console.log('⚠️  IMPORTANT: Rate Limits');
+  console.log('   Exceeding 10K records/day can rate limit your ENTIRE PDS.');
+  console.log('   This affects ALL users on your PDS, not just your account.');
+  console.log('   Import automatically limits to 10K records/day with pauses.');
+  console.log('   See: https://docs.bsky.app/blog/rate-limits-pds-v3');
+  console.log('');
 }
 
 /**

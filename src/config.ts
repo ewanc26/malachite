@@ -16,8 +16,21 @@ export const SAFETY_MARGIN = 1.0;
 // Record type
 export const RECORD_TYPE = 'fm.teal.alpha.feed.play';
 
-// Client agent
-export const CLIENT_AGENT = `lastfm-importer/v0.3.0 (${process.platform}; Node/${process.version})`;
+// Build client agent string
+export function buildClientAgent() {
+  const PLATFORM_LABELS: Record<string, string> = {
+    darwin: 'macOS',
+    linux: 'Linux',
+    win32: 'Windows',
+  };
+
+  const platform =
+    PLATFORM_LABELS[process.platform] ?? process.platform;
+
+  return `lastfm-importer/v0.4.0 (${platform}; Node/${process.version})`;
+}
+
+ const CLIENT_AGENT = buildClientAgent();
 
 // Default batch configuration - aggressive defaults for maximum speed
 // Will dynamically adjust based on success/failure

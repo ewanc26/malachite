@@ -2,6 +2,7 @@ import type { AtpAgent } from '@atproto/api';
 import type { PlayRecord, Config } from '../types.js';
 import { formatDate, formatDateRange } from '../utils/helpers.js';
 import * as ui from '../utils/ui.js';
+import { log } from '../utils/logger.js';
 
 interface ExistingRecord {
   uri: string;
@@ -22,7 +23,7 @@ export async function fetchExistingRecords(
   agent: AtpAgent,
   config: Config
 ): Promise<Map<string, ExistingRecord>> {
-  console.log('\n=== Fetching Existing Teal Records ===');
+  log.section('Fetching Existing Teal Records');
   const { RECORD_TYPE } = config;
   const did = agent.session?.did;
 
@@ -62,15 +63,16 @@ export async function fetchExistingRecords(
 
       // Show progress
       if (totalFetched % 500 === 0 && totalFetched > 0) {
-        console.log(`  Fetched ${totalFetched} records...`);
+        log.progress(`Fetched ${totalFetched.toLocaleString()} records...`);
       }
     } while (cursor);
 
-    console.log(`✓ Found ${existingRecords.size} existing records\n`);
+    log.success(`Found ${existingRecords.size.toLocaleString()} existing records`);
+    log.blank();
     return existingRecords;
   } catch (error) {
     const err = error as Error;
-    console.error('✗ Failed to fetch existing records:', err.message);
+    log.error(`Failed to fetch existing records: ${err.message}`);
     throw error;
   }
 }
@@ -154,7 +156,7 @@ export function filterNewRecords(
   lastfmRecords: PlayRecord[],
   existingRecords: Map<string, ExistingRecord>
 ): PlayRecord[] {
-  console.log('\n=== Identifying New Records ===');
+  log.section('Identifying New Records');
 
   const newRecords: PlayRecord[] = [];
   const duplicates: PlayRecord[] = [];
@@ -168,25 +170,23 @@ export function filterNewRecords(
     }
   }
 
-  console.log(`  Total Last.fm records: ${lastfmRecords.length}`);
-  console.log(`  Already in Teal: ${duplicates.length}`);
-  console.log(`  New records to import: ${newRecords.length}\n`);
+  log.info(`Total: ${lastfmRecords.length.toLocaleString()} records`);
+  log.info(`Existing: ${duplicates.length.toLocaleString()} already in Teal`);
+  log.info(`New: ${newRecords.length.toLocaleString()} to import`);
+  log.blank();
 
-  // Show some examples of duplicates if any
-  if (duplicates.length > 0 && duplicates.length <= 5) {
-    console.log('Examples of existing records (skipped):');
-    duplicates.slice(0, 5).forEach((record, i) => {
-      console.log(`  ${i + 1}. ${record.artists[0]?.artistName} - ${record.trackName}`);
-      console.log(`     Played: ${formatDate(record.playedTime, true)}`);
+  // Show some examples of duplicates if any (only in verbose mode)
+  if (log.getLevel() <= 0 && duplicates.length > 0) { // DEBUG level
+    const exampleCount = Math.min(3, duplicates.length);
+    log.debug('Examples of existing records (skipped):');
+    duplicates.slice(0, exampleCount).forEach((record, i) => {
+      log.debug(`  ${i + 1}. ${record.artists[0]?.artistName} - ${record.trackName}`);
+      log.debug(`     ${formatDate(record.playedTime, true)}`);
     });
-    console.log('');
-  } else if (duplicates.length > 5) {
-    console.log('Examples of existing records (skipped):');
-    duplicates.slice(0, 5).forEach((record, i) => {
-      console.log(`  ${i + 1}. ${record.artists[0]?.artistName} - ${record.trackName}`);
-      console.log(`     Played: ${formatDate(record.playedTime, true)}`);
-    });
-    console.log(`  ... and ${duplicates.length - 5} more duplicates\n`);
+    if (duplicates.length > exampleCount) {
+      log.debug(`  ... and ${(duplicates.length - exampleCount).toLocaleString()} more`);
+    }
+    log.blank();
   }
 
   return newRecords;
@@ -219,26 +219,23 @@ export function displaySyncStats(
   const existingArray = Array.from(existingRecords.values()).map(r => r.value);
   const existingRange = getRecordTimeRange(existingArray);
 
-  console.log('=== Sync Statistics ===');
-  console.log(`Last.fm Export:`);
-  console.log(`  Total records: ${lastfmRecords.length}`);
+  log.section('Sync Statistics');
+  log.info(`Last.fm export: ${lastfmRecords.length.toLocaleString()} records`);
   if (lastfmRange) {
-    console.log(`  Date range: ${formatDateRange(lastfmRange.earliest, lastfmRange.latest)}`);
+    log.info(`  Range: ${formatDateRange(lastfmRange.earliest, lastfmRange.latest)}`);
   }
-  console.log('');
+  log.blank();
 
-  console.log(`Teal (Current):`);
-  console.log(`  Total records: ${existingRecords.size}`);
+  log.info(`Teal current: ${existingRecords.size.toLocaleString()} records`);
   if (existingRange) {
-    console.log(`  Date range: ${formatDateRange(existingRange.earliest, existingRange.latest)}`);
+    log.info(`  Range: ${formatDateRange(existingRange.earliest, existingRange.latest)}`);
   }
-  console.log('');
+  log.blank();
 
-  console.log(`Sync Result:`);
-  console.log(`  Records to import: ${newRecords.length}`);
-  console.log(`  Duplicates skipped: ${lastfmRecords.length - newRecords.length}`);
-  console.log(`  Match rate: ${((1 - newRecords.length / lastfmRecords.length) * 100).toFixed(1)}%`);
-  console.log('');
+  log.info(`New to import: ${newRecords.length.toLocaleString()}`);
+  log.info(`Duplicates: ${(lastfmRecords.length - newRecords.length).toLocaleString()} skipped`);
+  log.info(`Match rate: ${((1 - newRecords.length / lastfmRecords.length) * 100).toFixed(1)}%`);
+  log.blank();
 }
 
 /**

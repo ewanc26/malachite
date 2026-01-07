@@ -35,17 +35,41 @@ export interface PlayRecord {
 }
 
 export interface CommandLineArgs {
+  // Help
   help?: boolean;
-  file?: string;
-  identifier?: string;
+  
+  // Authentication
+  handle?: string;
   password?: string;
+  
+  // Input
+  input?: string;
+  'spotify-input'?: string;
+  
+  // Mode
+  mode?: string;
+  
+  // Batch configuration
   'batch-size'?: string;
   'batch-delay'?: string;
+  
+  // Import options
+  reverse?: boolean;
   yes?: boolean;
   'dry-run'?: boolean;
+  
+  // Output
+  verbose?: boolean;
+  quiet?: boolean;
+  
+  // Legacy flags (for backwards compatibility)
+  file?: string;
+  'spotify-file'?: string;
+  identifier?: string;
   'reverse-chronological'?: boolean;
   sync?: boolean;
   spotify?: boolean;
+  combined?: boolean;
   'remove-duplicates'?: boolean;
 }
 

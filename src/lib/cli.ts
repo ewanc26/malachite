@@ -1,37 +1,89 @@
+#!/usr/bin/env node
+
 import { parseArgs } from 'node:util';
-import { AtpAgent } from '@atproto/api'; // Use AtpAgent for consistency
-import type { PlayRecord, Config, CommandLineArgs, PublishResult } from '../types.js'; 
-import { login } from './auth.js'; 
+import { AtpAgent } from '@atproto/api';
+import type { PlayRecord, Config, CommandLineArgs, PublishResult } from '../types.js';
+import { login } from './auth.js';
 import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js';
-import { parseSpotifyJson, convertSpotifyToPlayRecord, sortSpotifyRecords } from '../lib/spotify.js'; 
-import { publishRecordsWithApplyWrites } from './publisher.js'; 
-import { prompt } from '../utils/input.js'; 
-import config from '../config.js'; 
-import { calculateOptimalBatchSize, showRateLimitInfo } from '../utils/helpers.js';
-import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates } from './sync.js'; 
+import { parseSpotifyJson, convertSpotifyToPlayRecord, sortSpotifyRecords } from '../lib/spotify.js';
+import { parseCombinedExports } from '../lib/merge.js';
+import { publishRecordsWithApplyWrites } from './publisher.js';
+import { prompt } from '../utils/input.js';
+import config from '../config.js';
+import { calculateOptimalBatchSize } from '../utils/helpers.js';
+import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates } from './sync.js';
+import { Logger, LogLevel, setGlobalLogger, log } from '../utils/logger.js';
 
 /**
  * Show help message
  */
 export function showHelp(): void {
-    console.log(`
-Last.fm to ATProto Importer v0.3.0
+  console.log(`
+${'\x1b[1m'}Last.fm to ATProto Importer v0.4.0${'\x1b[0m'}
 
-Usage: npm start [options]
+${'\x1b[1m'}USAGE:${'\x1b[0m'}
+  npm start [options]
+  lastfm-import [options]
 
-Options:
-  -h, --help                     Show this help message
-  -f, --file <path>              Path to Last.fm CSV or Spotify JSON export file/directory
-  -i, --identifier <id>          ATProto handle or DID
-  -p, --password <pass>          ATProto app password
-  -b, --batch-size <num>         Number of records per batch (auto-calculated if not set)
+${'\x1b[1m'}AUTHENTICATION:${'\x1b[0m'}
+  -h, --handle <handle>          ATProto handle or DID (e.g., user.bsky.social)
+  -p, --password <password>      ATProto app password
+
+${'\x1b[1m'}INPUT:${'\x1b[0m'}
+  -i, --input <path>             Path to Last.fm CSV or Spotify JSON export
+  --spotify-input <path>         Path to Spotify export (for combined mode)
+
+${'\x1b[1m'}MODE:${'\x1b[0m'}
+  -m, --mode <mode>              Import mode (default: lastfm)
+                                 lastfm          Import Last.fm export only
+                                 spotify         Import Spotify export only
+                                 combined        Merge Last.fm + Spotify exports
+                                 sync            Skip existing records (sync mode)
+                                 deduplicate     Remove duplicate records
+
+${'\x1b[1m'}BATCH CONFIGURATION:${'\x1b[0m'}
+  -b, --batch-size <number>      Records per batch (default: auto-calculated)
   -d, --batch-delay <ms>         Delay between batches in ms (default: 500, min: 500)
-  -y, --yes                      Skip confirmation prompt
-  -n, --dry-run                  Preview records without publishing
-  -r, --reverse-chronological    Process newest first (default: oldest first)
-  -s, --sync                     Re-sync mode: check existing Teal records and only import new ones
-  --spotify                      Import from Spotify JSON export instead of Last.fm CSV
-  --remove-duplicates            Remove duplicate records from Teal (keeps first occurrence)
+
+${'\x1b[1m'}IMPORT OPTIONS:${'\x1b[0m'}
+  -r, --reverse                  Process newest records first (default: oldest first)
+  -y, --yes                      Skip confirmation prompts
+  --dry-run                      Preview without importing
+
+${'\x1b[1m'}OUTPUT:${'\x1b[0m'}
+  -v, --verbose                  Enable verbose logging (debug level)
+  -q, --quiet                    Suppress non-essential output
+  --help                         Show this help message
+
+${'\x1b[1m'}EXAMPLES:${'\x1b[0m'}
+
+  ${'\x1b[2m'}# Import Last.fm export${'\x1b[0m'}
+  npm start -- -i lastfm-export.csv -h user.bsky.social -p app-password
+
+  ${'\x1b[2m'}# Import Spotify export${'\x1b[0m'}
+  npm start -- -i spotify-export/ -m spotify -h user.bsky.social -p app-password
+
+  ${'\x1b[2m'}# Combined import (merge both sources)${'\x1b[0m'}
+  npm start -- -i lastfm.csv --spotify-input spotify/ -m combined -h user.bsky.social -p pass
+
+  ${'\x1b[2m'}# Sync mode (only import new records)${'\x1b[0m'}
+  npm start -- -i lastfm.csv -m sync -h user.bsky.social -p app-password
+
+  ${'\x1b[2m'}# Dry run with verbose logging${'\x1b[0m'}
+  npm start -- -i lastfm.csv --dry-run -v
+
+  ${'\x1b[2m'}# Remove duplicate records${'\x1b[0m'}
+  npm start -- -m deduplicate -h user.bsky.social -p app-password
+
+${'\x1b[1m'}NOTES:${'\x1b[0m'}
+  • Rate limits: Max 10,000 records/day to avoid PDS rate limiting
+  • Import will auto-pause between days for large datasets
+  • Press Ctrl+C during import to stop gracefully after current batch
+  • Sync mode requires authentication even with --dry-run
+
+${'\x1b[1m'}MORE INFO:${'\x1b[0m'}
+  Repository: https://github.com/yourusername/atproto-lastfm-importer
+  Issues: https://github.com/yourusername/atproto-lastfm-importer/issues
 `);
 }
 
@@ -39,216 +91,334 @@ Options:
  * Parse command line arguments
  */
 export function parseCommandLineArgs(): CommandLineArgs {
-    // The options definition is identical to the CommandLineArgs keys
-    const options = {
-        help: { type: 'boolean', short: 'h', default: false },
-        file: { type: 'string', short: 'f' },
-        identifier: { type: 'string', short: 'i' },
-        password: { type: 'string', short: 'p' },
-        'batch-size': { type: 'string', short: 'b' },
-        'batch-delay': { type: 'string', short: 'd' },
-        yes: { type: 'boolean', short: 'y', default: false },
-        'dry-run': { type: 'boolean', short: 'n', default: false },
-        'reverse-chronological': { type: 'boolean', short: 'r', default: false },
-        sync: { type: 'boolean', short: 's', default: false },
-        spotify: { type: 'boolean', default: false },
-        'remove-duplicates': { type: 'boolean', default: false },
-    } as const; 
+  const options = {
+    // Help
+    help: { type: 'boolean', default: false },
     
-    try {
-        const { values } = parseArgs({ options, allowPositionals: false });
-        return values as CommandLineArgs; 
-    } catch (error) {
-        const err = error as Error;
-        console.error('Error parsing arguments:', err.message);
-        showHelp();
-        process.exit(1);
+    // Authentication
+    handle: { type: 'string', short: 'h' },
+    password: { type: 'string', short: 'p' },
+    
+    // Input
+    input: { type: 'string', short: 'i' },
+    'spotify-input': { type: 'string' },
+    
+    // Mode
+    mode: { type: 'string', short: 'm' },
+    
+    // Batch configuration
+    'batch-size': { type: 'string', short: 'b' },
+    'batch-delay': { type: 'string', short: 'd' },
+    
+    // Import options
+    reverse: { type: 'boolean', short: 'r', default: false },
+    yes: { type: 'boolean', short: 'y', default: false },
+    'dry-run': { type: 'boolean', default: false },
+    
+    // Output
+    verbose: { type: 'boolean', short: 'v', default: false },
+    quiet: { type: 'boolean', short: 'q', default: false },
+    
+    // Legacy flags for backwards compatibility (hidden from help)
+    file: { type: 'string', short: 'f' },  // Maps to --input
+    'spotify-file': { type: 'string' },    // Maps to --spotify-input
+    identifier: { type: 'string' },        // Maps to --handle
+    'reverse-chronological': { type: 'boolean' },  // Maps to --reverse
+    sync: { type: 'boolean', short: 's' },  // Maps to --mode sync
+    spotify: { type: 'boolean' },           // Maps to --mode spotify
+    combined: { type: 'boolean' },          // Maps to --mode combined
+    'remove-duplicates': { type: 'boolean' }, // Maps to --mode deduplicate
+  } as const;
+
+  try {
+    const { values } = parseArgs({ options, allowPositionals: false });
+    
+    // Handle legacy flag mappings
+    const normalizedArgs: CommandLineArgs = {
+      help: values.help,
+      handle: values.handle || values.identifier,
+      password: values.password,
+      input: values.input || values.file,
+      'spotify-input': values['spotify-input'] || values['spotify-file'],
+      'batch-size': values['batch-size'],
+      'batch-delay': values['batch-delay'],
+      reverse: values.reverse || values['reverse-chronological'],
+      yes: values.yes,
+      'dry-run': values['dry-run'],
+      verbose: values.verbose,
+      quiet: values.quiet,
+    };
+    
+    // Determine mode from new --mode flag or legacy flags
+    if (values.mode) {
+      normalizedArgs.mode = values.mode;
+    } else if (values['remove-duplicates']) {
+      normalizedArgs.mode = 'deduplicate';
+    } else if (values.combined) {
+      normalizedArgs.mode = 'combined';
+    } else if (values.sync) {
+      normalizedArgs.mode = 'sync';
+    } else if (values.spotify) {
+      normalizedArgs.mode = 'spotify';
+    } else {
+      normalizedArgs.mode = 'lastfm'; // default
     }
+    
+    return normalizedArgs;
+  } catch (error) {
+    const err = error as Error;
+    console.error('Error parsing arguments:', err.message);
+    showHelp();
+    process.exit(1);
+  }
+}
+
+/**
+ * Validate and normalize mode
+ */
+function validateMode(mode: string): 'lastfm' | 'spotify' | 'combined' | 'sync' | 'deduplicate' {
+  const validModes = ['lastfm', 'spotify', 'combined', 'sync', 'deduplicate'];
+  const normalized = mode.toLowerCase();
+  
+  if (!validModes.includes(normalized)) {
+    throw new Error(
+      `Invalid mode: ${mode}. Must be one of: ${validModes.join(', ')}`
+    );
+  }
+  
+  return normalized as 'lastfm' | 'spotify' | 'combined' | 'sync' | 'deduplicate';
 }
 
 /**
  * The full, real implementation of the CLI
  */
 export async function runCLI(): Promise<void> {
-    try {
-        const args = parseCommandLineArgs();
-        const cfg = config as Config; // Use a constant for the typed config
+  try {
+    const args = parseCommandLineArgs();
+    const cfg = config as Config;
 
-        if (args.help) {
-            showHelp();
-            return;
-        }
+    // Setup logging
+    const logger = new Logger(
+      args.quiet ? LogLevel.WARN :
+      args.verbose ? LogLevel.DEBUG :
+      LogLevel.INFO
+    );
+    setGlobalLogger(logger);
 
-        if (!args.file) {
-            throw new Error('Missing required argument: -f, --file <path>');
-        }
-
-        const dryRun = args['dry-run'] ?? false;
-        const syncMode = args.sync ?? false;
-        const removeDuplicatesMode = args['remove-duplicates'] ?? false;
-        let agent: AtpAgent | null = null;
-
-        // Remove duplicates mode - requires authentication but not file
-        if (removeDuplicatesMode) {
-            if (!args.identifier || !args.password) {
-                throw new Error('Missing required arguments for login: -i (identifier) and -p (password)');
-            }
-            
-            agent = await login(args.identifier, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
-            
-            // Check for duplicates first
-            const result = await removeDuplicates(agent, cfg, true); // Always dry-run first to show info
-            
-            if (result.totalDuplicates === 0) {
-                return; // No duplicates, exit early
-            }
-            
-            // Ask for confirmation if not in dry-run mode
-            if (!dryRun && !(args.yes ?? false)) {
-                console.log(`⚠️  WARNING: This will permanently delete ${result.totalDuplicates} duplicate records from Teal.`);
-                console.log('   The first occurrence of each duplicate will be kept.\n');
-                const answer = await prompt('Are you sure you want to continue? (y/N) ');
-                if (answer.toLowerCase() !== 'y') {
-                    console.log('Duplicate removal cancelled by user.');
-                    process.exit(0);
-                }
-                
-                // Actually remove duplicates
-                await removeDuplicates(agent, cfg, false);
-                console.log('🎉 Duplicate removal complete!\n');
-            } else if (dryRun) {
-                console.log('DRY RUN: No records were actually removed.\n');
-                console.log('Remove --dry-run flag to actually delete duplicates.\n');
-            }
-            
-            return;
-        }
-
-        // 1. Get Authentication (required for sync mode, even in dry-run)
-        if (!dryRun || syncMode) {
-            if (!args.identifier || !args.password) {
-                throw new Error('Missing required arguments for login: -i (identifier) and -p (password)');
-            }
-            // Assume login returns AtpAgent, as per the type fix
-            agent = await login(args.identifier, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent; 
-        }
-
-        // 2. Parse and Prepare Records
-        const useSpotify = args.spotify ?? false;
-        let records: PlayRecord[];
-        let rawRecordCount: number;
-        
-        if (useSpotify) {
-            console.log('📀 Importing from Spotify export...\n');
-            const spotifyRecords = parseSpotifyJson(args.file);
-            rawRecordCount = spotifyRecords.length;
-            records = spotifyRecords.map(record => convertSpotifyToPlayRecord(record, cfg));
-        } else {
-            console.log('📀 Importing from Last.fm CSV export...\n');
-            const csvRecords = parseLastFmCsv(args.file);
-            rawRecordCount = csvRecords.length;
-            records = csvRecords.map(record => convertToPlayRecord(record, cfg));
-        }
-        
-        // 2.5. Sync Mode: Fetch existing records and filter duplicates
-        if (syncMode && agent) {
-            const originalRecords = [...records]; // Save before filtering
-            const existingRecords = await fetchExistingRecords(agent, cfg);
-            records = filterNewRecords(records, existingRecords);
-            
-            if (records.length === 0) {
-                console.log('✓ All records already exist in Teal. Nothing to import!');
-                process.exit(0);
-            }
-            
-            displaySyncStats(originalRecords, existingRecords, records);
-        }
-        
-        const totalRecords = records.length;
-        
-        const reverseChronological = args['reverse-chronological'] ?? false;
-        const sortedRecords = useSpotify 
-            ? sortSpotifyRecords(records, reverseChronological)
-            : sortRecords(records, reverseChronological); 
-        
-        // 3. Determine Batching parameters
-        let batchDelay = cfg.DEFAULT_BATCH_DELAY;
-        if (args['batch-delay']) {
-            const delay = parseInt(args['batch-delay'], 10);
-            if (isNaN(delay)) {
-                 throw new Error(`Invalid batch delay value: ${args['batch-delay']}`);
-            }
-            // Enforce minimum delay
-            batchDelay = Math.max(delay, cfg.MIN_BATCH_DELAY); 
-        }
-        
-        let batchSize: number;
-        if (args['batch-size']) {
-            batchSize = parseInt(args['batch-size'], 10);
-            if (isNaN(batchSize) || batchSize <= 0) {
-                 throw new Error(`Invalid batch size value: ${args['batch-size']}`);
-            }
-        } else {
-            // Calculate optimal batch size if not provided
-            batchSize = calculateOptimalBatchSize(totalRecords, batchDelay, cfg);
-        }
-
-        // 4. Show Rate Limiting Information
-        const recordsPerDay = cfg.RECORDS_PER_DAY_LIMIT * cfg.SAFETY_MARGIN;
-        const estimatedDays = Math.ceil(totalRecords / recordsPerDay);
-
-        // Updated call to match the expected signature in showRateLimitInfo (from previous response)
-        showRateLimitInfo(
-            totalRecords, 
-            batchSize, 
-            batchDelay, 
-            estimatedDays, 
-            cfg.RECORDS_PER_DAY_LIMIT,
-        );
-
-        // 5. Confirmation Prompt
-        if (!dryRun && !(args.yes ?? false)) {
-            if (syncMode) {
-                console.log(`\nReady to publish ${totalRecords.toLocaleString()} NEW records (${rawRecordCount - totalRecords} duplicates skipped).`);
-            } else {
-                console.log(`\nReady to publish ${totalRecords.toLocaleString()} records.`);
-            }
-            const answer = await prompt('Do you want to continue? (y/N) ');
-            if (answer.toLowerCase() !== 'y') {
-                console.log('Import cancelled by user.');
-                process.exit(0);
-            }
-        }
-        
-        // 6. Publish Records
-        const result: PublishResult = await publishRecordsWithApplyWrites(
-            agent, 
-            sortedRecords,
-            batchSize,
-            batchDelay,
-            cfg,
-            dryRun,
-            syncMode
-        );
-
-        // 7. Final Output
-        if (result.cancelled) {
-            console.log(`\nImport stopped gracefully. ${result.successCount} records processed.`);
-        } else if (dryRun) {
-            console.log(`\nDRY RUN COMPLETE${syncMode ? ' (SYNC MODE)' : ''}. No records were published.`);
-        } else {
-            console.log(`\n🎉 ${syncMode ? 'Sync' : 'Import'} Complete!`);
-            console.log(`Total records processed: ${result.successCount.toLocaleString()} (${result.errorCount.toLocaleString()} failed)`);
-            if (syncMode) {
-                console.log(`Duplicates skipped: ${rawRecordCount - totalRecords}`);
-            }
-        }
-
-    } catch (error) {
-        // Handle fatal errors
-        const err = error as Error;
-        console.error('\n🛑 A fatal error occurred:');
-        console.error(err.message);
-        process.exit(1);
+    if (args.help) {
+      showHelp();
+      return;
     }
+
+    // Validate and normalize mode
+    const mode = validateMode(args.mode || 'lastfm');
+    const dryRun = args['dry-run'] ?? false;
+    let agent: AtpAgent | null = null;
+
+    log.debug(`Mode: ${mode}`);
+    log.debug(`Dry run: ${dryRun}`);
+    log.debug(`Log level: ${args.verbose ? 'DEBUG' : args.quiet ? 'WARN' : 'INFO'}`);
+
+    // Validate mode-specific requirements
+    if (mode === 'combined') {
+      if (!args.input || !args['spotify-input']) {
+        throw new Error('Combined mode requires both --input (Last.fm) and --spotify-input (Spotify)');
+      }
+    } else if (mode !== 'deduplicate' && !args.input) {
+      throw new Error('Missing required argument: --input <path>');
+    }
+
+    // Deduplicate mode
+    if (mode === 'deduplicate') {
+      if (!args.handle || !args.password) {
+        throw new Error('Deduplicate mode requires --handle and --password');
+      }
+
+      log.section('Remove Duplicate Records');
+      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+
+      const result = await removeDuplicates(agent, cfg, true);
+
+      if (result.totalDuplicates === 0) {
+        return;
+      }
+
+      if (!dryRun && !args.yes) {
+        log.warn(`This will permanently delete ${result.totalDuplicates} duplicate records from Teal.`);
+        log.info('The first occurrence of each duplicate will be kept.');
+        log.blank();
+        const answer = await prompt('Are you sure you want to continue? (y/N) ');
+        if (answer.toLowerCase() !== 'y') {
+          log.info('Duplicate removal cancelled by user.');
+          process.exit(0);
+        }
+
+        await removeDuplicates(agent, cfg, false);
+        log.success('Duplicate removal complete!');
+      } else if (dryRun) {
+        log.info('DRY RUN: No records were actually removed.');
+        log.info('Remove --dry-run flag to actually delete duplicates.');
+      }
+
+      return;
+    }
+
+    // Authentication (required for sync mode, even in dry-run)
+    if (!dryRun || mode === 'sync') {
+      if (!args.handle || !args.password) {
+        throw new Error('Missing required arguments: --handle and --password');
+      }
+      log.debug('Authenticating...');
+      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+      log.debug('Authentication successful');
+    }
+
+    // Parse and prepare records
+    log.section('Loading Records');
+    let records: PlayRecord[];
+    let rawRecordCount: number;
+
+    if (mode === 'combined') {
+      log.info('Merging Last.fm and Spotify exports...');
+      records = parseCombinedExports(args.input!, args['spotify-input']!, cfg);
+      rawRecordCount = records.length;
+    } else if (mode === 'spotify') {
+      log.info('Importing from Spotify export...');
+      const spotifyRecords = parseSpotifyJson(args.input!);
+      rawRecordCount = spotifyRecords.length;
+      records = spotifyRecords.map(record => convertSpotifyToPlayRecord(record, cfg));
+    } else {
+      log.info('Importing from Last.fm CSV export...');
+      const csvRecords = parseLastFmCsv(args.input!);
+      rawRecordCount = csvRecords.length;
+      records = csvRecords.map(record => convertToPlayRecord(record, cfg));
+    }
+
+    log.success(`Loaded ${rawRecordCount.toLocaleString()} records`);
+
+    // Sync mode: filter existing records
+    if (mode === 'sync' && agent) {
+      log.section('Sync Mode');
+      log.info('Checking for existing records...');
+      const originalRecords = [...records];
+      const existingRecords = await fetchExistingRecords(agent, cfg);
+      records = filterNewRecords(records, existingRecords);
+
+      if (records.length === 0) {
+        log.success('All records already exist in Teal. Nothing to import!');
+        process.exit(0);
+      }
+
+      displaySyncStats(originalRecords, existingRecords, records);
+    }
+
+    const totalRecords = records.length;
+
+    // Sort records (skip for combined mode as it already sorts)
+    if (mode !== 'combined') {
+      log.debug(`Sorting records (reverse: ${args.reverse})...`);
+      records = mode === 'spotify'
+        ? sortSpotifyRecords(records, args.reverse ?? false)
+        : sortRecords(records, args.reverse ?? false);
+    }
+
+    // Determine batch parameters
+    log.section('Batch Configuration');
+    
+    let batchDelay = cfg.DEFAULT_BATCH_DELAY;
+    if (args['batch-delay']) {
+      const delay = parseInt(args['batch-delay'], 10);
+      if (isNaN(delay)) {
+        throw new Error(`Invalid batch delay: ${args['batch-delay']}`);
+      }
+      batchDelay = Math.max(delay, cfg.MIN_BATCH_DELAY);
+      if (delay < cfg.MIN_BATCH_DELAY) {
+        log.warn(`Batch delay increased to minimum: ${cfg.MIN_BATCH_DELAY}ms`);
+      }
+    }
+
+    let batchSize: number;
+    if (args['batch-size']) {
+      batchSize = parseInt(args['batch-size'], 10);
+      if (isNaN(batchSize) || batchSize <= 0) {
+        throw new Error(`Invalid batch size: ${args['batch-size']}`);
+      }
+      log.info(`Using manual batch size: ${batchSize} records`);
+    } else {
+      batchSize = calculateOptimalBatchSize(totalRecords, batchDelay, cfg);
+      log.info(`Using auto-calculated batch size: ${batchSize} records`);
+    }
+
+    log.info(`Batch delay: ${batchDelay}ms`);
+
+    // Show rate limiting information
+    log.section('Import Configuration');
+    log.info(`Total records: ${totalRecords.toLocaleString()}`);
+    log.info(`Batch size: ${batchSize} records`);
+    log.info(`Batch delay: ${batchDelay}ms`);
+    
+    const recordsPerDay = cfg.RECORDS_PER_DAY_LIMIT * cfg.SAFETY_MARGIN;
+    const estimatedDays = Math.ceil(totalRecords / recordsPerDay);
+    
+    if (estimatedDays > 1) {
+      log.info(`Duration: ${estimatedDays} days (${recordsPerDay.toLocaleString()} records/day limit)`);
+      log.warn('Large import will span multiple days with automatic pauses');
+    }
+    
+    log.blank();
+
+    // Confirmation prompt
+    if (!dryRun && !args.yes) {
+      const modeLabel = mode === 'combined' ? 'merged' : mode === 'sync' ? 'new' : '';
+      const skippedInfo = mode === 'sync' ? ` (${rawRecordCount - totalRecords} skipped)` : '';
+      log.raw(`Ready to publish ${totalRecords.toLocaleString()} ${modeLabel} records${skippedInfo}`);
+      const answer = await prompt('Continue? (y/N) ');
+      if (answer.toLowerCase() !== 'y') {
+        log.info('Cancelled by user.');
+        process.exit(0);
+      }
+      log.blank();
+    }
+
+    // Publish records
+    log.section('Publishing Records');
+    const result: PublishResult = await publishRecordsWithApplyWrites(
+      agent,
+      records,
+      batchSize,
+      batchDelay,
+      cfg,
+      dryRun,
+      mode === 'sync' || mode === 'combined'
+    );
+
+    // Final output
+    log.blank();
+    if (result.cancelled) {
+      log.warn(`Stopped: ${result.successCount.toLocaleString()} processed`);
+    } else if (dryRun) {
+      const modeLabel = mode === 'combined' ? 'COMBINED' : mode === 'sync' ? 'SYNC' : '';
+      log.success(`Dry run complete${modeLabel ? ` (${modeLabel})` : ''}`);
+    } else {
+      const modeLabel = mode === 'combined' ? 'Combined' : mode === 'sync' ? 'Sync' : 'Import';
+      log.success(`${modeLabel} complete!`);
+      log.info(`Processed: ${result.successCount.toLocaleString()} (${result.errorCount.toLocaleString()} failed)`);
+      if (mode === 'sync' || mode === 'combined') {
+        const skipped = rawRecordCount - totalRecords;
+        if (skipped > 0) {
+          log.info(`Skipped: ${skipped.toLocaleString()} duplicates`);
+        }
+      }
+    }
+
+  } catch (error) {
+    const err = error as Error;
+    log.blank();
+    log.fatal('A fatal error occurred:');
+    log.error(err.message);
+    if (log.getLevel() <= LogLevel.DEBUG) {
+      console.error(err.stack);
+    }
+    process.exit(1);
+  }
 }

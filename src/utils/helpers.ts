@@ -129,6 +129,9 @@ export function calculateOptimalBatchSize(totalRecords: number, batchDelay: numb
 
 /**
  * Logs rate limiting and batching information to the console.
+ * Note: This function cannot import log from logger.ts to avoid circular dependencies,
+ * so it uses console.log directly. The CLI controls the log level, so this output
+ * is appropriately controlled.
  */
 export function showRateLimitInfo(
   totalRecords: number,

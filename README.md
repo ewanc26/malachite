@@ -6,8 +6,10 @@ Import your Last.fm listening history to the AT Protocol network using the `fm.t
 
 ## Features
 
+- ✅ **Structured Logging**: Color-coded output with debug/verbose modes
 - ✅ **Batch Operations**: Uses `com.atproto.repo.applyWrites` for efficient batch publishing (up to 200 records per call)
 - ✅ **Spotify Support**: Import from Spotify Extended Streaming History (JSON format)
+- ✅ **Combined Import**: Merge Last.fm and Spotify exports, automatically deduplicating overlapping plays
 - ✅ **TID-based Record Keys**: Records use timestamp-based identifiers for chronological ordering
 - ✅ **Re-Sync Mode**: Check existing Teal records and only import new scrobbles (no duplicates!)
 - ✅ **Rate Limiting**: Automatically limits imports to 1K records per day to prevent rate limiting your entire PDS
@@ -44,16 +46,64 @@ npm run build
 
 ## Usage
 
-### Re-Sync Mode (NEW!)
+### Combined Import Mode
+
+Merge your Last.fm and Spotify listening history into a single, deduplicated import:
+
+```bash
+# Preview the merged import
+npm start -- -i lastfm.csv --spotify-input spotify-export/ -m combined --dry-run
+
+# Perform the combined import
+npm start -- -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+```
+
+Combined mode will:
+1. Parse both Last.fm CSV and Spotify JSON exports
+2. Normalize track names and artist names for comparison
+3. Identify duplicate plays (same track within 5 minutes)
+4. Choose the best version of each play:
+   - Prefers Last.fm records with MusicBrainz IDs
+   - Otherwise prefers Spotify for better metadata quality
+5. Merge into a single chronological timeline
+6. Show detailed statistics about the merge
+
+This is perfect for:
+- Getting complete listening history from both services
+- Filling gaps where one service was used more than the other
+- Ensuring the best metadata quality for each play
+- Avoiding duplicate entries when both services tracked the same play
+
+**Example Output:**
+```
+📊 Merge Statistics
+═══════════════════════════════════════════
+Last.fm records:     15,234
+Spotify records:     8,567
+Total before merge:  23,801
+
+Duplicates removed:  3,421
+Last.fm unique:      11,813
+Spotify unique:      5,146
+
+Final merged total:  16,959
+
+Date range:
+  First: 2015-03-15 10:23:45
+  Last:  2025-01-07 14:32:11
+═══════════════════════════════════════════
+```
+
+### Re-Sync Mode
 
 If you've already imported scrobbles before and want to sync your Last.fm export with Teal without creating duplicates:
 
 ```bash
 # Preview what will be synced
-npm start -- -f lastfm.csv -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --sync --dry-run
+npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync --dry-run
 
 # Perform the sync
-npm start -- -f lastfm.csv -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --sync -y
+npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync -y
 ```
 
 Sync mode will:
@@ -70,6 +120,24 @@ This is perfect for:
 
 **Note:** Sync mode requires authentication even in dry-run mode to fetch existing records.
 
+### Remove Duplicates Mode
+
+If you accidentally imported duplicate records, you can clean them up:
+
+```bash
+# Preview duplicates (dry run)
+npm start -- -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --dry-run
+
+# Remove duplicates (keeps first occurrence)
+npm start -- -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx
+```
+
+This will:
+1. Fetch all existing records from Teal
+2. Identify duplicate plays (same track, artist, and timestamp)
+3. Keep the first occurrence of each duplicate
+4. Delete the rest
+
 ### Interactive Mode
 
 The simplest way to use the importer - just run it and follow the prompts:
@@ -84,56 +152,131 @@ For automation or scripting, provide all parameters via flags:
 
 ```bash
 # Full automation (Last.fm)
-npm start -- -f lastfm.csv -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 # Import from Spotify (single file)
-npm start -- -f Streaming_History_Audio_2021-2023_0.json --spotify -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+npm start -- -i Streaming_History_Audio_2021-2023_0.json -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 # Import from Spotify (directory with multiple files - recommended)
-npm start -- -f '/path/to/Spotify Extended Streaming History' --spotify -i alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+npm start -- -i '/path/to/Spotify Extended Streaming History' -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+
+# Combined import (merge Last.fm and Spotify)
+npm start -- -i lastfm.csv --spotify-input '/path/to/Spotify Extended Streaming History' -m combined -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 # Preview without publishing
-npm start -- -f lastfm.csv --dry-run
+npm start -- -i lastfm.csv --dry-run
 
-# Preview Spotify import
-npm start -- -f '/path/to/Spotify Extended Streaming History' --spotify --dry-run
+# Preview with verbose debug output
+npm start -- -i lastfm.csv --dry-run -v
+
+# Quiet mode (only warnings and errors)
+npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -q -y
 
 # Custom batch settings (advanced users)
-npm start -- -f lastfm.csv -i alice.bsky.social -b 20 -d 3000
+npm start -- -i lastfm.csv -h alice.bsky.social -b 20 -d 3000
 
 # Process newest tracks first
-npm start -- -f lastfm.csv -i alice.bsky.social -r -y
+npm start -- -i lastfm.csv -h alice.bsky.social -r -y
 ```
 
 ## Command Line Options
 
+### Authentication
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--handle <handle>` | `-h` | ATProto handle or DID (e.g., alice.bsky.social) |
+| `--password <pass>` | `-p` | ATProto app password |
+
+### Input
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--input <path>` | `-i` | Path to Last.fm CSV or Spotify JSON file/directory |
+| `--spotify-input <path>` | | Path to Spotify export (for combined mode) |
+
+### Mode
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--help` | `-h` | Show help message | - |
-| `--file <path>` | `-f` | Path to Last.fm CSV or Spotify JSON file/directory | (prompted) |
-| `--spotify` | | Import from Spotify JSON export instead of Last.fm | false |
-| `--identifier <id>` | `-i` | ATProto handle or DID | (prompted) |
-| `--password <pass>` | `-p` | ATProto app password | (prompted) |
+| `--mode <mode>` | `-m` | Import mode | `lastfm` |
+
+**Available modes:**
+- `lastfm` - Import Last.fm export only
+- `spotify` - Import Spotify export only
+- `combined` - Merge Last.fm + Spotify exports
+- `sync` - Skip existing records (sync mode)
+- `deduplicate` - Remove duplicate records
+
+### Batch Configuration
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
 | `--batch-size <num>` | `-b` | Records per batch | Auto-calculated |
-| `--batch-delay <ms>` | `-d` | Delay between batches in ms | 2000 (min: 1000) |
-| `--yes` | `-y` | Skip confirmation prompt | false |
-| `--dry-run` | `-n` | Preview without publishing | false |
-| `--reverse-chronological` | `-r` | Process newest first | false (oldest first) |
-| `--sync` | `-s` | Re-sync mode: only import new records | false |
+| `--batch-delay <ms>` | `-d` | Delay between batches in ms | 500 (min: 500) |
+
+### Import Options
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--reverse` | `-r` | Process newest first | false (oldest first) |
+| `--yes` | `-y` | Skip confirmation prompts | false |
+| `--dry-run` | | Preview without importing | false |
+
+### Output
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--verbose` | `-v` | Enable debug logging | false |
+| `--quiet` | `-q` | Suppress non-essential output | false |
+| `--help` | | Show help message | - |
+
+### Legacy Flags (Backwards Compatible)
+
+For backwards compatibility, the following old flags still work:
+- `--file` → Use `--input` instead
+- `--identifier` → Use `--handle` instead
+- `--spotify-file` → Use `--spotify-input` instead
+- `--reverse-chronological` → Use `--reverse` instead
+- `--spotify` → Use `--mode spotify` instead
+- `--combined` → Use `--mode combined` instead
+- `--sync` → Use `--mode sync` instead
+- `--remove-duplicates` → Use `--mode deduplicate` instead
 
 ### Batch Settings
 
 The importer automatically calculates optimal batch settings based on your total record count and rate limits. You generally **don't need** to specify batch settings unless you have specific requirements.
 
 **Automatic behavior:**
-- For imports < 1K records: Uses default settings (50 records/batch, 2s delay)
+- For imports < 1K records: Uses default settings (200 records/batch, 500ms delay)
 - For imports > 1K records: Automatically calculates settings to spread across multiple days
 
 **Manual override** (advanced):
 - `--batch-size`: Number of records processed per batch (1-200, PDS maximum)
-- `--batch-delay`: Milliseconds to wait between batches (min: 1000)
+- `--batch-delay`: Milliseconds to wait between batches (min: 500)
 
 ⚠️ Lower delays increase speed but risk hitting rate limits. The automatic calculation is recommended.
+
+## Logging and Output
+
+The importer includes a structured logging system with color-coded output:
+
+- **Green (✓)**: Success messages
+- **Cyan (→)**: Progress updates
+- **Yellow (⚠️)**: Warnings
+- **Red (✗)**: Errors
+- **Bold Red (🛑)**: Fatal errors
+
+### Verbosity Levels
+
+**Default Mode**: Shows standard operational messages
+```bash
+npm start -- -i lastfm.csv -h alice.bsky.social -p pass
+```
+
+**Verbose Mode** (`-v`): Shows detailed debug information including batch timing, API calls, etc.
+```bash
+npm start -- -i lastfm.csv -h alice.bsky.social -p pass -v
+```
+
+**Quiet Mode** (`-q`): Only shows warnings and errors
+```bash
+npm start -- -i lastfm.csv -h alice.bsky.social -p pass -q
+```
 
 ## Getting Your Data
 
@@ -167,7 +310,7 @@ Each scrobble (from Last.fm or Spotify) becomes an `fm.teal.alpha.feed.play` rec
 - **trackName**: The name of the track
 - **artists**: Array of artist objects (requires `artistName`, optional `artistMbId` for Last.fm)
 - **playedTime**: ISO 8601 timestamp of when you listened
-- **submissionClientAgent**: Identifies this importer (`lastfm-importer/v0.3.0`)
+- **submissionClientAgent**: Identifies this importer (`lastfm-importer/v0.4.0`)
 - **musicServiceBaseDomain**: Set to `last.fm` or `spotify.com` depending on source
 
 ### Optional Fields (when available)
@@ -194,7 +337,7 @@ Each scrobble (from Last.fm or Spotify) becomes an `fm.teal.alpha.feed.play` rec
   "recordingMbId": "3a390ad3-fe56-45f2-a073-bebc45d6bde1",
   "playedTime": "2025-11-13T23:49:36Z",
   "originUrl": "https://www.last.fm/music/Cjbeards/_/Paint+My+Masterpiece",
-  "submissionClientAgent": "lastfm-importer/v0.3.0",
+  "submissionClientAgent": "lastfm-importer/v0.4.0",
   "musicServiceBaseDomain": "last.fm"
 }
 ```
@@ -212,7 +355,7 @@ Each scrobble (from Last.fm or Spotify) becomes an `fm.teal.alpha.feed.play` rec
   "releaseName": "Twenty",
   "playedTime": "2021-09-09T10:34:08Z",
   "originUrl": "https://open.spotify.com/track/3gZqDJkMZipOYCRjlHWgOV",
-  "submissionClientAgent": "lastfm-importer/v0.3.0",
+  "submissionClientAgent": "lastfm-importer/v0.4.0",
   "musicServiceBaseDomain": "spotify.com"
 }
 ```
@@ -221,7 +364,7 @@ Each scrobble (from Last.fm or Spotify) becomes an `fm.teal.alpha.feed.play` rec
 
 By default, records are processed **oldest first** (chronological order). This means your earliest scrobbles will appear first in your ATProto feed.
 
-Use the `--reverse-chronological` or `-r` flag to process **newest first** instead.
+Use the `--reverse` or `-r` flag to process **newest first** instead.
 
 ## Multi-Day Imports
 
@@ -254,7 +397,7 @@ Example output for a 5,000 record import:
 Preview what will be imported without actually publishing:
 
 ```bash
-npm start -- -f lastfm.csv --dry-run
+npm start -- -i lastfm.csv --dry-run
 ```
 
 Dry run shows:
@@ -283,13 +426,20 @@ atproto-lastfm-importer/
 ├── src/
 │   ├── lib/
 │   │   ├── auth.ts         # Authentication & identity resolution
-│   │   ├── cli.ts          # Command line argument parsing
+│   │   ├── cli.ts          # Command line interface & argument parsing
 │   │   ├── csv.ts          # CSV parsing & record conversion
-│   │   └── publisher.ts    # Batch publishing with rate limiting
+│   │   ├── publisher.ts    # Batch publishing with rate limiting
+│   │   ├── spotify.ts      # Spotify JSON parsing
+│   │   ├── merge.ts        # Combined import deduplication
+│   │   └── sync.ts         # Re-sync mode & duplicate detection
 │   ├── utils/
+│   │   ├── logger.ts       # Structured logging system (NEW!)
 │   │   ├── helpers.ts      # Utility functions (timing, formatting)
 │   │   ├── input.ts        # User input handling (prompts, passwords)
-│   │   └── rate-limiter.ts # Rate limiting calculations
+│   │   ├── rate-limiter.ts # Rate limiting calculations
+│   │   ├── killswitch.ts   # Graceful shutdown handling
+│   │   ├── tid.ts          # TID generation from timestamps
+│   │   └── ui.ts           # UI elements (spinners, progress bars)
 │   ├── config.ts           # Configuration constants
 │   └── types.ts            # TypeScript type definitions
 ├── lexicons/               # fm.teal.alpha lexicon definitions
@@ -298,6 +448,7 @@ atproto-lastfm-importer/
 │           └── play.json   # Play record schema
 ├── package.json
 ├── tsconfig.json
+├── CLI_IMPROVEMENTS.md     # Detailed CLI documentation
 └── README.md
 ```
 
@@ -328,7 +479,7 @@ npm run clean
 1. Calculates safe daily limit (90% of 1K = 900 records/day)
 2. Determines how many days needed for your import
 3. Calculates optimal batch size and delay to spread records evenly
-4. Enforces minimum 1 second delay between batches
+4. Enforces minimum 500ms delay between batches
 5. Shows clear schedule before starting
 
 ### Record Processing
@@ -397,6 +548,15 @@ The lexicon defines:
 - Check progress messages - large imports take time
 - Multi-day imports pause for 24 hours between days
 - You can safely stop (Ctrl+C) and resume later
+- Use `--verbose` flag to see detailed progress
+
+### Too much output
+- Use `--quiet` flag to suppress non-essential messages
+- Only warnings and errors will be shown
+
+### Need more details
+- Use `--verbose` flag to see debug-level information
+- Shows batch timing, API calls, and detailed progress
 
 ## Contributing
 
@@ -406,9 +566,11 @@ Contributions welcome! Please:
 3. Make your changes with tests
 4. Submit a pull request
 
+See `CLI_IMPROVEMENTS.md` for developer documentation on the logging system and CLI structure.
+
 ## License
 
-MIT License - See LICENSE file for details
+AGPL-3.0-only - See LICENCE file for details
 
 ## Credits
 
@@ -416,6 +578,7 @@ MIT License - See LICENSE file for details
 - CSV parsing via [csv-parse](https://www.npmjs.com/package/csv-parse)
 - Identity resolution via [Slingshot](https://slingshot.danner.cloud)
 - Follows the `fm.teal.alpha` lexicon standard
+- Colored output via [chalk](https://www.npmjs.com/package/chalk)
 
 ---
 
