@@ -1,28 +1,27 @@
 /**
  * TID (Timestamp Identifier) generation for ATProto
  * Based on: https://atproto.com/specs/record-key#record-key-type-tid
+ * 
+ * This uses the official ATProto TID implementation from @atproto/common-web
+ * to ensure compatibility and avoid precision issues with large numbers.
  */
 
-const B32_CHARS = '234567abcdefghijklmnopqrstuvwxyz';
+import { TID } from '@atproto/common-web';
 
 /**
  * Generate a TID from a Date object
- * TID encodes Unix microseconds in base32
+ * Uses the official ATProto TID.fromTime method
  */
 export function generateTID(date: Date): string {
   // Convert to Unix microseconds
-  // JS only gives us millisecond precision, so we multiply by 1000
-  const unixMicros = Math.floor(date.getTime() * 1000);
+  // The ATProto implementation expects microseconds
+  const unixMicros = date.getTime() * 1000;
   
-  let tid = '';
-  for (let i = 0; i < 13; i++) {
-    // Extract 5 bits at a time (base32)
-    const shift = 60 - (i * 5);
-    const index = Math.floor(unixMicros / Math.pow(2, shift)) % 32;
-    tid += B32_CHARS[index];
-  }
+  // Use a fixed clockid of 0 for deterministic TID generation from timestamps
+  // This ensures the same playedTime always generates the same TID
+  const clockid = 0;
   
-  return tid;
+  return TID.fromTime(unixMicros, clockid).toString();
 }
 
 /**
