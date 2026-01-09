@@ -282,7 +282,7 @@ npm start -- -i lastfm.csv -h alice.bsky.social -p pass -q
 
 ### Last.fm Export
 
-1. Go to <https://mainstream.ghan.nl/export.html>
+1. Go to <https://lastfm.ghan.nl/export/>
 2. Request your data export in CSV format
 3. Download the CSV file when ready
 4. Use the CSV file path with this script
