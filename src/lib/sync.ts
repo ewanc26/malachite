@@ -46,7 +46,7 @@ export async function fetchExistingRecords(
       });
 
       for (const record of response.data.records) {
-        const playRecord = record.value as PlayRecord;
+        const playRecord = record.value as unknown as PlayRecord;
         // Create a unique key based on track, artist, and timestamp
         const key = createRecordKey(playRecord);
         // Note: This will overwrite duplicates, but that's OK for sync mode
@@ -108,7 +108,7 @@ export async function fetchAllRecords(
       });
 
       for (const record of response.data.records) {
-        const playRecord = record.value as PlayRecord;
+        const playRecord = record.value as unknown as PlayRecord;
         allRecords.push({
           uri: record.uri,
           cid: record.cid,

@@ -10,6 +10,12 @@ import {
 import { generateTIDFromISO } from '../utils/tid.js';
 import type { PlayRecord, Config, PublishResult } from '../types.js';
 import { log } from '../utils/logger.js';
+import {
+  ImportState,
+  updateImportState,
+  completeImport,
+  getResumeStartIndex,
+} from '../utils/import-state.js';
 
 /**
  * Maximum operations allowed per applyWrites call
@@ -21,7 +27,7 @@ const MAX_APPLY_WRITES_OPS = 200;
 
 /**
  * Publish records using com.atproto.repo.applyWrites for efficient batching
- * with adaptive rate limiting
+ * with adaptive rate limiting and stateful resume support
  */
 export async function publishRecordsWithApplyWrites(
   agent: AtpAgent | null,
@@ -30,7 +36,8 @@ export async function publishRecordsWithApplyWrites(
   batchDelay: number,
   config: Config,
   dryRun = false,
-  syncMode = false
+  syncMode = false,
+  importState: ImportState | null = null
 ): Promise<PublishResult> {
   const { RECORD_TYPE } = config;
   const totalRecords = records.length;
@@ -52,10 +59,11 @@ export async function publishRecordsWithApplyWrites(
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
 
-  log.section('Adaptive Import');
-  log.info(`Initial batch size: ${currentBatchSize} records`);
-  log.info(`Initial delay: ${currentBatchDelay}ms`);
+  log.section('Conservative Adaptive Import');
+  log.info(`Initial batch size: ${currentBatchSize} records (conservative)`);
+  log.info(`Initial delay: ${currentBatchDelay}ms (2 seconds - very safe)`);
   log.info(`Will automatically adjust based on server response`);
+  log.info(`Using conservative settings to protect your PDS`);
   log.blank();
   log.info(`Publishing ${totalRecords.toLocaleString()} records using adaptive batching...`);
   log.warn('Press Ctrl+C to stop gracefully after current batch');
@@ -65,7 +73,14 @@ export async function publishRecordsWithApplyWrites(
   let errorCount = 0;
   const startTime = Date.now();
 
-  let i = 0;
+  // Resume from saved state if available
+  let startIndex = importState ? getResumeStartIndex(importState) : 0;
+  if (importState && startIndex > 0) {
+    log.info(`Resuming from record ${startIndex + 1} (${(startIndex / totalRecords * 100).toFixed(1)}% complete)`);
+    log.blank();
+  }
+
+  let i = startIndex;
   while (i < totalRecords) {
     // Check killswitch before processing batch
     if (isImportCancelled()) {
@@ -83,12 +98,14 @@ export async function publishRecordsWithApplyWrites(
     const batchStartTime = Date.now();
 
     // Build writes array for applyWrites with TID-based rkeys
-    const writes = batch.map((record) => ({
-      $type: 'com.atproto.repo.applyWrites#create',
-      collection: RECORD_TYPE,
-      rkey: generateTIDFromISO(record.playedTime),
-      value: record,
-    }));
+    const writes = await Promise.all(
+      batch.map(async (record) => ({
+        $type: 'com.atproto.repo.applyWrites#create',
+        collection: RECORD_TYPE,
+        rkey: await generateTIDFromISO(record.playedTime, 'inject:playlist'),
+        value: record,
+      }))
+    );
 
     try {
       // Call applyWrites with the batch
@@ -105,6 +122,11 @@ export async function publishRecordsWithApplyWrites(
 
       const batchDuration = Date.now() - batchStartTime;
       log.debug(`Batch complete in ${batchDuration}ms (${batchSuccessCount} successful)`);
+
+      // Save state after successful batch
+      if (importState) {
+        updateImportState(importState, i + batch.length - 1, batchSuccessCount, 0);
+      }
 
       // Speed up if we're doing well (after 5 consecutive successes)
       if (consecutiveSuccesses >= 5 && currentBatchDelay > config.MIN_BATCH_DELAY) {
@@ -168,6 +190,11 @@ export async function publishRecordsWithApplyWrites(
           log.debug(`... and ${batch.length - 3} more failed`);
         }
 
+        // Save state with errors
+        if (importState) {
+          updateImportState(importState, i + batch.length - 1, 0, batch.length);
+        }
+
         // If too many consecutive failures, slow down
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
           currentBatchDelay = Math.min(currentBatchDelay * 2, 10000);
@@ -198,6 +225,12 @@ export async function publishRecordsWithApplyWrites(
     if (i < totalRecords) {
       await new Promise((resolve) => setTimeout(resolve, currentBatchDelay));
     }
+  }
+
+  // Mark import as complete
+  if (importState) {
+    completeImport(importState);
+    log.debug('Import state saved as completed');
   }
 
   return { successCount, errorCount, cancelled: false };
