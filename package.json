@@ -1,6 +1,6 @@
 {
   "name": "lastfm-importer",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Import Last.fm scrobbles to ATProto with rate limiting",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,11 +29,11 @@
   "author": "",
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "@atproto/api": "^0.13.35",
+    "@atproto/api": "^0.18.13",
     "chalk": "^5.6.2",
     "cli-progress": "^3.12.0",
-    "csv-parse": "^5.6.0",
-    "ora": "^8.2.0"
+    "csv-parse": "^6.1.0",
+    "ora": "^9.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.27",
