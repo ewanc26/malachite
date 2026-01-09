@@ -6,12 +6,15 @@ import type { Config } from './types.js';
 // - This affects all users on your PDS, not just your account
 // - See: https://docs.bsky.app/blog/rate-limits-pds-v3
 //
-// Default limit: Aggressive initial limit that will dynamically adjust
-// Start high and back off if we hit rate limits
+// Default limit: Very conservative (7,500 records/day) to be safe
 export const RECORDS_PER_DAY_LIMIT = 10000;
 
-// Safety margin factor - start aggressive, will back off if needed
-export const SAFETY_MARGIN = 1.0;
+// Safety margin factor - 75% by default for maximum safety
+// Use --aggressive flag to set to 85% for faster imports
+export const SAFETY_MARGIN = 0.75;
+
+// Aggressive safety margin (for --aggressive flag)
+export const AGGRESSIVE_SAFETY_MARGIN = 0.85;
 
 // Record type
 export const RECORD_TYPE = 'fm.teal.alpha.feed.play';
@@ -32,13 +35,13 @@ export function buildClientAgent() {
 
  const CLIENT_AGENT = buildClientAgent();
 
-// Default batch configuration - aggressive defaults for maximum speed
+// Default batch configuration - conservative for PDS safety
 // Will dynamically adjust based on success/failure
-export const DEFAULT_BATCH_SIZE = 200; // Max allowed by applyWrites
-export const DEFAULT_BATCH_DELAY = 500; // Start with 500ms between batches
+export const DEFAULT_BATCH_SIZE = 100; // Conservative default
+export const DEFAULT_BATCH_DELAY = 2000; // Start with 2 seconds between batches
 
-// Minimum safe delay between batches (500ms for adaptive mode)
-export const MIN_BATCH_DELAY = 500;
+// Minimum safe delay between batches (1 second minimum)
+export const MIN_BATCH_DELAY = 1000;
 
 // Maximum batch size (PDS limit is 200 operations per call)
 export const MAX_BATCH_SIZE = 200;
@@ -59,6 +62,7 @@ const config: Config = {
   SLINGSHOT_RESOLVER,
   RECORDS_PER_DAY_LIMIT,
   SAFETY_MARGIN,
+  AGGRESSIVE_SAFETY_MARGIN,
 };
 
 export default config;

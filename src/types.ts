@@ -57,6 +57,8 @@ export interface CommandLineArgs {
   reverse?: boolean;
   yes?: boolean;
   'dry-run'?: boolean;
+  aggressive?: boolean;
+  fresh?: boolean;
   
   // Output
   verbose?: boolean;
@@ -92,6 +94,7 @@ export interface Config {
   MIN_BATCH_DELAY: number;      // from rate limiter
   RECORDS_PER_DAY_LIMIT: number;
   SAFETY_MARGIN: number;
+  AGGRESSIVE_SAFETY_MARGIN: number;
 
   SLINGSHOT_RESOLVER: string;
 

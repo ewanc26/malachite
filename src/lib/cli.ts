@@ -13,6 +13,13 @@ import config from '../config.js';
 import { calculateOptimalBatchSize } from '../utils/helpers.js';
 import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates } from './sync.js';
 import { Logger, LogLevel, setGlobalLogger, log } from '../utils/logger.js';
+import {
+  loadImportState,
+  createImportState,
+  displayResumeInfo,
+  clearImportState,
+  ImportState,
+} from '../utils/import-state.js';
 
 /**
  * Show help message
@@ -42,13 +49,15 @@ ${'\x1b[1m'}MODE:${'\x1b[0m'}
                                  deduplicate     Remove duplicate records
 
 ${'\x1b[1m'}BATCH CONFIGURATION:${'\x1b[0m'}
-  -b, --batch-size <number>      Records per batch (default: auto-calculated)
-  -d, --batch-delay <ms>         Delay between batches in ms (default: 500, min: 500)
+  -b, --batch-size <number>      Records per batch (default: 100)
+  -d, --batch-delay <ms>         Delay between batches in ms (default: 2000ms, min: 1000ms)
 
 ${'\x1b[1m'}IMPORT OPTIONS:${'\x1b[0m'}
   -r, --reverse                  Process newest records first (default: oldest first)
   -y, --yes                      Skip confirmation prompts
   --dry-run                      Preview without importing
+  --aggressive                   Faster imports (8,500/day vs 7,500/day default)
+  --fresh                        Start fresh (ignore previous import state)
 
 ${'\x1b[1m'}OUTPUT:${'\x1b[0m'}
   -v, --verbose                  Enable verbose logging (debug level)
@@ -114,6 +123,8 @@ export function parseCommandLineArgs(): CommandLineArgs {
     reverse: { type: 'boolean', short: 'r', default: false },
     yes: { type: 'boolean', short: 'y', default: false },
     'dry-run': { type: 'boolean', default: false },
+    aggressive: { type: 'boolean', default: false },
+    fresh: { type: 'boolean', default: false },
     
     // Output
     verbose: { type: 'boolean', short: 'v', default: false },
@@ -145,6 +156,8 @@ export function parseCommandLineArgs(): CommandLineArgs {
       reverse: values.reverse || values['reverse-chronological'],
       yes: values.yes,
       'dry-run': values['dry-run'],
+      aggressive: values.aggressive,
+      fresh: values.fresh,
       verbose: values.verbose,
       quiet: values.quiet,
     };
@@ -351,13 +364,19 @@ export async function runCLI(): Promise<void> {
 
     log.info(`Batch delay: ${batchDelay}ms`);
 
+    // Apply aggressive mode if enabled
+    const safetyMargin = args.aggressive ? cfg.AGGRESSIVE_SAFETY_MARGIN : cfg.SAFETY_MARGIN;
+    if (args.aggressive) {
+      log.warn('⚡ Aggressive mode enabled: Using 85% of daily limit (8,500 records/day)');
+    }
+
     // Show rate limiting information
     log.section('Import Configuration');
     log.info(`Total records: ${totalRecords.toLocaleString()}`);
     log.info(`Batch size: ${batchSize} records`);
     log.info(`Batch delay: ${batchDelay}ms`);
     
-    const recordsPerDay = cfg.RECORDS_PER_DAY_LIMIT * cfg.SAFETY_MARGIN;
+    const recordsPerDay = cfg.RECORDS_PER_DAY_LIMIT * safetyMargin;
     const estimatedDays = Math.ceil(totalRecords / recordsPerDay);
     
     if (estimatedDays > 1) {
@@ -366,6 +385,46 @@ export async function runCLI(): Promise<void> {
     }
     
     log.blank();
+
+    // Check for existing import state (resume functionality)
+    let importState: ImportState | null = null;
+    if (!dryRun && args.input) {
+      // Clear state if --fresh flag is used
+      if (args.fresh) {
+        clearImportState(args.input, mode);
+        log.info('Starting fresh import (previous state cleared)');
+      } else {
+        // Try to load existing state
+        importState = loadImportState(args.input, mode);
+        
+        if (importState && !importState.completed) {
+          displayResumeInfo(importState);
+          
+          if (!args.yes) {
+            const answer = await prompt('Resume from previous import? (Y/n) ');
+            if (answer.toLowerCase() === 'n') {
+              importState = null;
+              clearImportState(args.input, mode);
+              log.info('Starting fresh import');
+              log.blank();
+            }
+          } else {
+            log.info('Auto-resuming previous import (--yes flag)');
+            log.blank();
+          }
+        } else if (importState?.completed) {
+          log.info('Previous import was completed - starting fresh');
+          importState = null;
+          clearImportState(args.input, mode);
+        }
+      }
+      
+      // Create new state if not resuming
+      if (!importState) {
+        importState = createImportState(args.input, mode, totalRecords);
+        log.debug('Created new import state');
+      }
+    }
 
     // Confirmation prompt
     if (!dryRun && !args.yes) {
@@ -389,7 +448,8 @@ export async function runCLI(): Promise<void> {
       batchDelay,
       cfg,
       dryRun,
-      mode === 'sync' || mode === 'combined'
+      mode === 'sync' || mode === 'combined',
+      importState
     );
 
     // Final output

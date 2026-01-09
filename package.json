@@ -14,7 +14,10 @@
     "dev": "tsc && node dist/index.js",
     "dry-run": "npm run build && node dist/index.js --dry-run",
     "clean": "rm -rf dist",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "npm run build && node --test dist/tests/**/*.test.js",
+    "test:tid": "npm run build && node --test dist/tests/tid.test.js",
+    "test:watch": "npm run build && node --watch --test dist/tests/**/*.test.js"
   },
   "keywords": [
     "lastfm",
