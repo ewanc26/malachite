@@ -91,8 +91,8 @@ ${'\x1b[1m'}NOTES:${'\x1b[0m'}
   • Sync mode requires authentication even with --dry-run
 
 ${'\x1b[1m'}MORE INFO:${'\x1b[0m'}
-  Repository: https://github.com/yourusername/atproto-lastfm-importer
-  Issues: https://github.com/yourusername/atproto-lastfm-importer/issues
+  Repository: https://github.com/ewanc26/atproto-lastfm-importer
+  Issues: https://github.com/ewanc26/atproto-lastfm-importer/issues
 `);
 }
 

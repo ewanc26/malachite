@@ -30,7 +30,7 @@ export function buildClientAgent() {
   const platform =
     PLATFORM_LABELS[process.platform] ?? process.platform;
 
-  return `lastfm-importer/v0.6.0 (${platform}; Node/${process.version})`;
+  return `malachite/v0.6.0 (${platform}; Node/${process.version})`;
 }
 
  const CLIENT_AGENT = buildClientAgent();
