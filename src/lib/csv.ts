@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { parse } from 'csv-parse/sync';
 import type { LastFmCsvRecord, PlayRecord, Config } from '../types.js';
 import { formatDate } from '../utils/helpers.js';
+import { buildClientAgent } from '../config.js';
 
 /**
  * Parse Last.fm CSV export
@@ -23,8 +24,8 @@ export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
 /**
  * Convert Last.fm CSV record to ATProto play record
  */
-export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config): PlayRecord {
-  const { RECORD_TYPE, CLIENT_AGENT } = config;
+export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config, debug = false): PlayRecord {
+  const { RECORD_TYPE } = config;
 
   // Parse the timestamp
   const timestamp = parseInt(csvRecord.uts);
@@ -48,7 +49,7 @@ export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config):
     trackName: csvRecord.track,
     artists,
     playedTime,
-    submissionClientAgent: CLIENT_AGENT,
+    submissionClientAgent: buildClientAgent(debug),
     musicServiceBaseDomain: 'last.fm',
     originUrl: '',
   };

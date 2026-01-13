@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PlayRecord, Config } from '../types.js';
 import { formatDate } from '../utils/helpers.js';
+import { buildClientAgent } from '../config.js';
 
 /**
  * Spotify streaming history record
@@ -70,8 +71,8 @@ export function parseSpotifyJson(filePathOrDir: string): SpotifyRecord[] {
 /**
  * Convert Spotify record to ATProto play record
  */
-export function convertSpotifyToPlayRecord(spotifyRecord: SpotifyRecord, config: Config): PlayRecord {
-  const { RECORD_TYPE, CLIENT_AGENT } = config;
+export function convertSpotifyToPlayRecord(spotifyRecord: SpotifyRecord, config: Config, debug = false): PlayRecord {
+  const { RECORD_TYPE } = config;
 
   // Spotify timestamp is already in ISO 8601 format
   const playedTime = spotifyRecord.ts;
@@ -90,7 +91,7 @@ export function convertSpotifyToPlayRecord(spotifyRecord: SpotifyRecord, config:
     trackName: spotifyRecord.master_metadata_track_name || 'Unknown Track',
     artists,
     playedTime,
-    submissionClientAgent: CLIENT_AGENT,
+    submissionClientAgent: buildClientAgent(debug),
     musicServiceBaseDomain: 'spotify.com',
     originUrl: '',
   };

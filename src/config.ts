@@ -20,7 +20,11 @@ export const AGGRESSIVE_SAFETY_MARGIN = 0.85;
 export const RECORD_TYPE = 'fm.teal.alpha.feed.play';
 
 // Build client agent string
-export function buildClientAgent() {
+export function buildClientAgent(debug = false) {
+  if (!debug) {
+    return 'malachite/v0.6.0';
+  }
+
   const PLATFORM_LABELS: Record<string, string> = {
     darwin: 'macOS',
     linux: 'Linux',
@@ -32,8 +36,6 @@ export function buildClientAgent() {
 
   return `malachite/v0.6.0 (${platform}; Node/${process.version})`;
 }
-
- const CLIENT_AGENT = buildClientAgent();
 
 // Default batch configuration - conservative for PDS safety
 // Will dynamically adjust based on success/failure
@@ -49,12 +51,11 @@ export const MAX_BATCH_SIZE = 200;
 // Slingshot resolver URL
 export const SLINGSHOT_RESOLVER = 'https://slingshot.microcosm.blue';
 
-const config: Config = {
+const config = {
   RECORD_TYPE,
   MIN_RECORDS_FOR_SCALING: 20,
   BASE_BATCH_SIZE: 200,  // Match DEFAULT_BATCH_SIZE for consistency
   SCALING_FACTOR: 1.5,
-  CLIENT_AGENT,
   DEFAULT_BATCH_SIZE,
   DEFAULT_BATCH_DELAY,
   MIN_BATCH_DELAY,

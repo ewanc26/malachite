@@ -291,20 +291,22 @@ export async function runCLI(): Promise<void> {
     let records: PlayRecord[];
     let rawRecordCount: number;
 
+    const isDebug = args.verbose ?? false;
+
     if (mode === 'combined') {
       log.info('Merging Last.fm and Spotify exports...');
-      records = parseCombinedExports(args.input!, args['spotify-input']!, cfg);
+      records = parseCombinedExports(args.input!, args['spotify-input']!, cfg, isDebug);
       rawRecordCount = records.length;
     } else if (mode === 'spotify') {
       log.info('Importing from Spotify export...');
       const spotifyRecords = parseSpotifyJson(args.input!);
       rawRecordCount = spotifyRecords.length;
-      records = spotifyRecords.map(record => convertSpotifyToPlayRecord(record, cfg));
+      records = spotifyRecords.map(record => convertSpotifyToPlayRecord(record, cfg, isDebug));
     } else {
       log.info('Importing from Last.fm CSV export...');
       const csvRecords = parseLastFmCsv(args.input!);
       rawRecordCount = csvRecords.length;
-      records = csvRecords.map(record => convertToPlayRecord(record, cfg));
+      records = csvRecords.map(record => convertToPlayRecord(record, cfg, isDebug));
     }
 
     log.success(`Loaded ${rawRecordCount.toLocaleString()} records`);

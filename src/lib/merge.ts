@@ -215,7 +215,8 @@ function displayMergeStats(stats: MergeStats, merged: PlayRecord[]): void {
 export function parseCombinedExports(
   lastfmPath: string,
   spotifyPath: string,
-  config: Config
+  config: Config,
+  debug = false
 ): PlayRecord[] {
   log.section('Combined Import Mode');
   log.blank();
@@ -223,12 +224,12 @@ export function parseCombinedExports(
   // Parse Last.fm
   log.info('Parsing Last.fm export...');
   const lastfmCsvRecords = parseLastFmCsv(lastfmPath);
-  const lastfmRecords = lastfmCsvRecords.map(r => convertToPlayRecord(r, config));
+  const lastfmRecords = lastfmCsvRecords.map(r => convertToPlayRecord(r, config, debug));
 
   // Parse Spotify
   log.info('Parsing Spotify export...');
   const spotifyJsonRecords = parseSpotifyJson(spotifyPath);
-  const spotifyRecords = spotifyJsonRecords.map(r => convertSpotifyToPlayRecord(r, config));
+  const spotifyRecords = spotifyJsonRecords.map(r => convertSpotifyToPlayRecord(r, config, debug));
 
   // Merge and deduplicate
   const { merged, stats } = mergeRecords(lastfmRecords, spotifyRecords);

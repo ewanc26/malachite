@@ -88,8 +88,6 @@ export interface Config {
   SCALING_FACTOR: number;
   DEFAULT_BATCH_DELAY: number;
 
-  CLIENT_AGENT: string;
-
   DEFAULT_BATCH_SIZE: number;   // from rate limiter
   MIN_BATCH_DELAY: number;      // from rate limiter
   RECORDS_PER_DAY_LIMIT: number;
