@@ -27,7 +27,7 @@ export interface ImportState {
  * Get the state file path for an import
  */
 export function getStateFilePath(inputFile: string, mode: string): string {
-  const stateDir = path.join(os.homedir(), '.lastfm-importer', 'state');
+  const stateDir = path.join(os.homedir(), '.malachite', 'state');
   
   // Create state directory if it doesn't exist
   if (!fs.existsSync(stateDir)) {

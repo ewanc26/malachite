@@ -1,4 +1,4 @@
-# Last.fm to ATProto Importer
+# Malachite
 
 Import your Last.fm and Spotify listening history to the AT Protocol network using the `fm.teal.alpha.feed.play` lexicon.
 
@@ -256,7 +256,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 - **trackName**: The name of the track
 - **artists**: Array of artist objects (requires `artistName`, optional `artistMbId` for Last.fm)
 - **playedTime**: ISO 8601 timestamp of when you listened
-- **submissionClientAgent**: Identifies this importer (`lastfm-importer/v0.6.0`)
+- **submissionClientAgent**: Identifies this importer (`malachite/v0.6.0`)
 - **musicServiceBaseDomain**: Set to `last.fm` or `spotify.com`
 
 ### Optional Fields
@@ -283,7 +283,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
   "recordingMbId": "3a390ad3-fe56-45f2-a073-bebc45d6bde1",
   "playedTime": "2025-11-13T23:49:36Z",
   "originUrl": "https://www.last.fm/music/Cjbeards/_/Paint+My+Masterpiece",
-  "submissionClientAgent": "lastfm-importer/v0.6.0",
+  "submissionClientAgent": "malachite/v0.6.0",
   "musicServiceBaseDomain": "last.fm"
 }
 ```
@@ -301,7 +301,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
   "releaseName": "Twenty",
   "playedTime": "2021-09-09T10:34:08Z",
   "originUrl": "https://open.spotify.com/track/3gZqDJkMZipOYCRjlHWgOV",
-  "submissionClientAgent": "lastfm-importer/v0.6.0",
+  "submissionClientAgent": "malachite/v0.6.0",
   "musicServiceBaseDomain": "spotify.com"
 }
 ```
