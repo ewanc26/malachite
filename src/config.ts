@@ -22,7 +22,7 @@ export const RECORD_TYPE = 'fm.teal.alpha.feed.play';
 // Build client agent string
 export function buildClientAgent(debug = false) {
   if (!debug) {
-    return 'malachite/v0.6.0';
+    return 'malachite/v0.6.1';
   }
 
   const PLATFORM_LABELS: Record<string, string> = {
@@ -34,7 +34,7 @@ export function buildClientAgent(debug = false) {
   const platform =
     PLATFORM_LABELS[process.platform] ?? process.platform;
 
-  return `malachite/v0.6.0 (${platform}; Node/${process.version})`;
+  return `malachite/v0.6.1 (${platform}; Node/${process.version})`;
 }
 
 // Default batch configuration - conservative for PDS safety
