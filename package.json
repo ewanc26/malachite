@@ -1,6 +1,6 @@
 {
   "name": "malachite",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Import Last.fm scrobbles to ATProto with rate limiting",
   "type": "module",
   "main": "./dist/index.js",
