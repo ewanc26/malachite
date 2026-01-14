@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 import { parseArgs } from 'node:util';
 import { AtpAgent } from '@atproto/api';
 import type { PlayRecord, Config, CommandLineArgs, PublishResult } from '../types.js';
@@ -11,8 +10,10 @@ import { publishRecordsWithApplyWrites } from './publisher.js';
 import { prompt } from '../utils/input.js';
 import config from '../config.js';
 import { calculateOptimalBatchSize } from '../utils/helpers.js';
-import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates } from './sync.js';
+import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates, deduplicateInputRecords } from './sync.js';
 import { Logger, LogLevel, setGlobalLogger, log } from '../utils/logger.js';
+import { registerKillswitch } from '../utils/killswitch.js';
+import { clearCache, clearAllCaches } from '../utils/teal-cache.js';
 import {
   loadImportState,
   createImportState,
@@ -26,7 +27,7 @@ import {
  */
 export function showHelp(): void {
   console.log(`
-${'\x1b[1m'}Last.fm to ATProto Importer v0.6.1${'\x1b[0m'}
+${'\x1b[1m'}Last.fm to ATProto Importer v0.6.2${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
   npm start [options]
@@ -57,7 +58,9 @@ ${'\x1b[1m'}IMPORT OPTIONS:${'\x1b[0m'}
   -y, --yes                      Skip confirmation prompts
   --dry-run                      Preview without importing
   --aggressive                   Faster imports (8,500/day vs 7,500/day default)
-  --fresh                        Start fresh (ignore previous import state)
+  --fresh                        Start fresh (ignore cache & previous import state)
+  --clear-cache                  Clear cached records for current user
+  --clear-all-caches             Clear all cached records
 
 ${'\x1b[1m'}OUTPUT:${'\x1b[0m'}
   -v, --verbose                  Enable verbose logging (debug level)
@@ -65,7 +68,6 @@ ${'\x1b[1m'}OUTPUT:${'\x1b[0m'}
   --help                         Show this help message
 
 ${'\x1b[1m'}EXAMPLES:${'\x1b[0m'}
-
   ${'\x1b[2m'}# Import Last.fm export${'\x1b[0m'}
   npm start -- -i lastfm-export.csv -h user.bsky.social -p app-password
 
@@ -84,6 +86,12 @@ ${'\x1b[1m'}EXAMPLES:${'\x1b[0m'}
   ${'\x1b[2m'}# Remove duplicate records${'\x1b[0m'}
   npm start -- -m deduplicate -h user.bsky.social -p app-password
 
+  ${'\x1b[2m'}# Clear cache for current user${'\x1b[0m'}
+  npm start -- --clear-cache -h user.bsky.social -p app-password
+
+  ${'\x1b[2m'}# Clear all caches${'\x1b[0m'}
+  npm start -- --clear-all-caches
+
 ${'\x1b[1m'}NOTES:${'\x1b[0m'}
   • Rate limits: Max 10,000 records/day to avoid PDS rate limiting
   • Import will auto-pause between days for large datasets
@@ -101,50 +109,35 @@ ${'\x1b[1m'}MORE INFO:${'\x1b[0m'}
  */
 export function parseCommandLineArgs(): CommandLineArgs {
   const options = {
-    // Help
     help: { type: 'boolean', default: false },
-    
-    // Authentication
     handle: { type: 'string', short: 'h' },
     password: { type: 'string', short: 'p' },
-    
-    // Input
     input: { type: 'string', short: 'i' },
     'spotify-input': { type: 'string' },
-    
-    // Mode
     mode: { type: 'string', short: 'm' },
-    
-    // Batch configuration
     'batch-size': { type: 'string', short: 'b' },
     'batch-delay': { type: 'string', short: 'd' },
-    
-    // Import options
     reverse: { type: 'boolean', short: 'r', default: false },
     yes: { type: 'boolean', short: 'y', default: false },
     'dry-run': { type: 'boolean', default: false },
     aggressive: { type: 'boolean', default: false },
     fresh: { type: 'boolean', default: false },
-    
-    // Output
+    'clear-cache': { type: 'boolean', default: false },
+    'clear-all-caches': { type: 'boolean', default: false },
     verbose: { type: 'boolean', short: 'v', default: false },
     quiet: { type: 'boolean', short: 'q', default: false },
-    
-    // Legacy flags for backwards compatibility (hidden from help)
-    file: { type: 'string', short: 'f' },  // Maps to --input
-    'spotify-file': { type: 'string' },    // Maps to --spotify-input
-    identifier: { type: 'string' },        // Maps to --handle
-    'reverse-chronological': { type: 'boolean' },  // Maps to --reverse
-    sync: { type: 'boolean', short: 's' },  // Maps to --mode sync
-    spotify: { type: 'boolean' },           // Maps to --mode spotify
-    combined: { type: 'boolean' },          // Maps to --mode combined
-    'remove-duplicates': { type: 'boolean' }, // Maps to --mode deduplicate
+    file: { type: 'string', short: 'f' },
+    'spotify-file': { type: 'string' },
+    identifier: { type: 'string' },
+    'reverse-chronological': { type: 'boolean' },
+    sync: { type: 'boolean', short: 's' },
+    spotify: { type: 'boolean' },
+    combined: { type: 'boolean' },
+    'remove-duplicates': { type: 'boolean' },
   } as const;
 
   try {
     const { values } = parseArgs({ options, allowPositionals: false });
-    
-    // Handle legacy flag mappings
     const normalizedArgs: CommandLineArgs = {
       help: values.help,
       handle: values.handle || values.identifier,
@@ -158,11 +151,12 @@ export function parseCommandLineArgs(): CommandLineArgs {
       'dry-run': values['dry-run'],
       aggressive: values.aggressive,
       fresh: values.fresh,
+      'clear-cache': values['clear-cache'],
+      'clear-all-caches': values['clear-all-caches'],
       verbose: values.verbose,
       quiet: values.quiet,
     };
-    
-    // Determine mode from new --mode flag or legacy flags
+
     if (values.mode) {
       normalizedArgs.mode = values.mode;
     } else if (values['remove-duplicates']) {
@@ -174,9 +168,9 @@ export function parseCommandLineArgs(): CommandLineArgs {
     } else if (values.spotify) {
       normalizedArgs.mode = 'spotify';
     } else {
-      normalizedArgs.mode = 'lastfm'; // default
+      normalizedArgs.mode = 'lastfm';
     }
-    
+
     return normalizedArgs;
   } catch (error) {
     const err = error as Error;
@@ -192,13 +186,9 @@ export function parseCommandLineArgs(): CommandLineArgs {
 function validateMode(mode: string): 'lastfm' | 'spotify' | 'combined' | 'sync' | 'deduplicate' {
   const validModes = ['lastfm', 'spotify', 'combined', 'sync', 'deduplicate'];
   const normalized = mode.toLowerCase();
-  
   if (!validModes.includes(normalized)) {
-    throw new Error(
-      `Invalid mode: ${mode}. Must be one of: ${validModes.join(', ')}`
-    );
+    throw new Error(`Invalid mode: ${mode}. Must be one of: ${validModes.join(', ')}`);
   }
-  
   return normalized as 'lastfm' | 'spotify' | 'combined' | 'sync' | 'deduplicate';
 }
 
@@ -207,10 +197,11 @@ function validateMode(mode: string): 'lastfm' | 'spotify' | 'combined' | 'sync' 
  */
 export async function runCLI(): Promise<void> {
   try {
+    registerKillswitch();
     const args = parseCommandLineArgs();
     const cfg = config as Config;
+    let agent: AtpAgent | null = null;
 
-    // Setup logging
     const logger = new Logger(
       args.quiet ? LogLevel.WARN :
       args.verbose ? LogLevel.DEBUG :
@@ -223,16 +214,36 @@ export async function runCLI(): Promise<void> {
       return;
     }
 
-    // Validate and normalize mode
+    if (args['clear-all-caches']) {
+      log.section('Clear All Caches');
+      clearAllCaches();
+      log.success('All caches cleared successfully');
+      return;
+    }
+
+    if (args['clear-cache']) {
+      if (!args.handle || !args.password) {
+        throw new Error('--clear-cache requires --handle and --password to identify the cache');
+      }
+      log.section('Clear Cache');
+      log.info('Authenticating to identify cache...');
+      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+      const did = agent.session?.did;
+      if (!did) {
+        throw new Error('Failed to get DID from session');
+      }
+      clearCache(did);
+      log.success(`Cache cleared for ${args.handle} (${did})`);
+      return;
+    }
+
     const mode = validateMode(args.mode || 'lastfm');
     const dryRun = args['dry-run'] ?? false;
-    let agent: AtpAgent | null = null;
 
     log.debug(`Mode: ${mode}`);
     log.debug(`Dry run: ${dryRun}`);
     log.debug(`Log level: ${args.verbose ? 'DEBUG' : args.quiet ? 'WARN' : 'INFO'}`);
 
-    // Validate mode-specific requirements
     if (mode === 'combined') {
       if (!args.input || !args['spotify-input']) {
         throw new Error('Combined mode requires both --input (Last.fm) and --spotify-input (Spotify)');
@@ -241,21 +252,16 @@ export async function runCLI(): Promise<void> {
       throw new Error('Missing required argument: --input <path>');
     }
 
-    // Deduplicate mode
     if (mode === 'deduplicate') {
       if (!args.handle || !args.password) {
         throw new Error('Deduplicate mode requires --handle and --password');
       }
-
       log.section('Remove Duplicate Records');
       agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
-
       const result = await removeDuplicates(agent, cfg, true);
-
       if (result.totalDuplicates === 0) {
         return;
       }
-
       if (!dryRun && !args.yes) {
         log.warn(`This will permanently delete ${result.totalDuplicates} duplicate records from Teal.`);
         log.info('The first occurrence of each duplicate will be kept.');
@@ -265,32 +271,25 @@ export async function runCLI(): Promise<void> {
           log.info('Duplicate removal cancelled by user.');
           process.exit(0);
         }
-
         await removeDuplicates(agent, cfg, false);
         log.success('Duplicate removal complete!');
       } else if (dryRun) {
         log.info('DRY RUN: No records were actually removed.');
         log.info('Remove --dry-run flag to actually delete duplicates.');
       }
-
       return;
     }
 
-    // Authentication (required for sync mode, even in dry-run)
-    if (!dryRun || mode === 'sync') {
-      if (!args.handle || !args.password) {
-        throw new Error('Missing required arguments: --handle and --password');
-      }
-      log.debug('Authenticating...');
-      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
-      log.debug('Authentication successful');
+    if (!args.handle || !args.password) {
+      throw new Error('Missing required arguments: --handle and --password');
     }
+    log.debug('Authenticating...');
+    agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+    log.debug('Authentication successful');
 
-    // Parse and prepare records
     log.section('Loading Records');
     let records: PlayRecord[];
     let rawRecordCount: number;
-
     const isDebug = args.verbose ?? false;
 
     if (mode === 'combined') {
@@ -311,25 +310,40 @@ export async function runCLI(): Promise<void> {
 
     log.success(`Loaded ${rawRecordCount.toLocaleString()} records`);
 
-    // Sync mode: filter existing records
-    if (mode === 'sync' && agent) {
-      log.section('Sync Mode');
-      log.info('Checking for existing records...');
-      const originalRecords = [...records];
-      const existingRecords = await fetchExistingRecords(agent, cfg);
-      records = filterNewRecords(records, existingRecords);
+    const dedupResult = deduplicateInputRecords(records);
+    records = dedupResult.unique;
+    if (dedupResult.duplicates > 0) {
+      log.warn(`Removed ${dedupResult.duplicates.toLocaleString()} duplicate(s) from input data`);
+      log.info(`Unique records: ${records.length.toLocaleString()}`);
+    } else {
+      log.info(`No duplicates found in input data`);
+    }
+    log.blank();
 
+    if (agent) {
+      const originalRecords = [...records];
+      const existingRecords = await fetchExistingRecords(agent, cfg, args.fresh ?? false);
+      records = filterNewRecords(records, existingRecords);
       if (records.length === 0) {
         log.success('All records already exist in Teal. Nothing to import!');
         process.exit(0);
       }
-
-      displaySyncStats(originalRecords, existingRecords, records);
+      if (mode === 'sync' || mode === 'combined') {
+        displaySyncStats(originalRecords, existingRecords, records);
+      } else {
+        const skipped = originalRecords.length - records.length;
+        if (skipped > 0) {
+          log.info(`Found ${skipped.toLocaleString()} record(s) already in Teal (skipping)`);
+          log.info(`New records to import: ${records.length.toLocaleString()}`);
+        } else {
+          log.info(`All ${records.length.toLocaleString()} records are new`);
+        }
+        log.blank();
+      }
     }
 
     const totalRecords = records.length;
 
-    // Sort records (skip for combined mode as it already sorts)
     if (mode !== 'combined') {
       log.debug(`Sorting records (reverse: ${args.reverse})...`);
       records = mode === 'spotify'
@@ -337,9 +351,7 @@ export async function runCLI(): Promise<void> {
         : sortRecords(records, args.reverse ?? false);
     }
 
-    // Determine batch parameters
     log.section('Batch Configuration');
-    
     let batchDelay = cfg.DEFAULT_BATCH_DELAY;
     if (args['batch-delay']) {
       const delay = parseInt(args['batch-delay'], 10);
@@ -366,42 +378,33 @@ export async function runCLI(): Promise<void> {
 
     log.info(`Batch delay: ${batchDelay}ms`);
 
-    // Apply aggressive mode if enabled
     const safetyMargin = args.aggressive ? cfg.AGGRESSIVE_SAFETY_MARGIN : cfg.SAFETY_MARGIN;
     if (args.aggressive) {
       log.warn('⚡ Aggressive mode enabled: Using 85% of daily limit (8,500 records/day)');
     }
 
-    // Show rate limiting information
     log.section('Import Configuration');
     log.info(`Total records: ${totalRecords.toLocaleString()}`);
     log.info(`Batch size: ${batchSize} records`);
     log.info(`Batch delay: ${batchDelay}ms`);
-    
+
     const recordsPerDay = cfg.RECORDS_PER_DAY_LIMIT * safetyMargin;
     const estimatedDays = Math.ceil(totalRecords / recordsPerDay);
-    
     if (estimatedDays > 1) {
       log.info(`Duration: ${estimatedDays} days (${recordsPerDay.toLocaleString()} records/day limit)`);
       log.warn('Large import will span multiple days with automatic pauses');
     }
-    
     log.blank();
 
-    // Check for existing import state (resume functionality)
     let importState: ImportState | null = null;
     if (!dryRun && args.input) {
-      // Clear state if --fresh flag is used
       if (args.fresh) {
         clearImportState(args.input, mode);
         log.info('Starting fresh import (previous state cleared)');
       } else {
-        // Try to load existing state
         importState = loadImportState(args.input, mode);
-        
         if (importState && !importState.completed) {
           displayResumeInfo(importState);
-          
           if (!args.yes) {
             const answer = await prompt('Resume from previous import? (Y/n) ');
             if (answer.toLowerCase() === 'n') {
@@ -420,15 +423,12 @@ export async function runCLI(): Promise<void> {
           clearImportState(args.input, mode);
         }
       }
-      
-      // Create new state if not resuming
       if (!importState) {
         importState = createImportState(args.input, mode, totalRecords);
         log.debug('Created new import state');
       }
     }
 
-    // Confirmation prompt
     if (!dryRun && !args.yes) {
       const modeLabel = mode === 'combined' ? 'merged' : mode === 'sync' ? 'new' : '';
       const skippedInfo = mode === 'sync' ? ` (${rawRecordCount - totalRecords} skipped)` : '';
@@ -441,7 +441,6 @@ export async function runCLI(): Promise<void> {
       log.blank();
     }
 
-    // Publish records
     log.section('Publishing Records');
     const result: PublishResult = await publishRecordsWithApplyWrites(
       agent,
@@ -454,7 +453,6 @@ export async function runCLI(): Promise<void> {
       importState
     );
 
-    // Final output
     log.blank();
     if (result.cancelled) {
       log.warn(`Stopped: ${result.successCount.toLocaleString()} processed`);
@@ -472,9 +470,13 @@ export async function runCLI(): Promise<void> {
         }
       }
     }
-
   } catch (error) {
     const err = error as Error;
+    if (err.message === 'Operation cancelled by user') {
+      log.blank();
+      log.warn('Operation cancelled by user');
+      process.exit(0);
+    }
     log.blank();
     log.fatal('A fatal error occurred:');
     log.error(err.message);

@@ -2,6 +2,7 @@
 
 Import your Last.fm and Spotify listening history to the AT Protocol network using the `fm.teal.alpha.feed.play` lexicon.
 
+**Repository:** [atproto-lastfm-importer](https://github.com/ewanc26/atproto-lastfm-importer)  
 [Also available on Tangled](https://tangled.org/@did:plc:ofrbh253gwicbkc5nktqepol/atproto-lastfm-importer)
 
 ## ⚠️ Important: Rate Limits
@@ -18,18 +19,21 @@ For more details, see the [Bluesky Rate Limits Documentation](https://docs.bsky.
 
 ## Quick Start
 
+**Note:** You must build the project first, then run with arguments.
+
 ```bash
-# Install dependencies
-npm install
+# Install dependencies and build
+pnpm install
+pnpm build
 
-# Build the project
-npm run build
+# Show help
+pnpm start -- --help
 
-# Run with interactive prompts
-npm start
+# Run with command line arguments
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
-# Or run with command line arguments
-npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+# Alternative: run directly with node (no -- needed)
+node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 ```
 
 ## Features
@@ -42,6 +46,8 @@ npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 - ✅ **Duplicate Removal**: Clean up accidentally imported duplicate records
 
 ### Performance & Safety
+- ✅ **Automatic Duplicate Prevention**: Automatically checks Teal and skips records that already exist (no duplicates!)
+- ✅ **Input Deduplication**: Removes duplicate entries within the source file before submission
 - ✅ **Batch Operations**: Uses `com.atproto.repo.applyWrites` for efficient batch publishing (up to 200 records per call)
 - ✅ **Rate Limiting**: Automatic daily limits prevent PDS rate limiting
 - ✅ **Multi-Day Imports**: Large imports automatically span multiple days with 24-hour pauses
@@ -71,10 +77,10 @@ Merge your Last.fm and Spotify listening history into a single, deduplicated imp
 
 ```bash
 # Preview the merged import
-npm start -- -i lastfm.csv --spotify-input spotify-export/ -m combined --dry-run
+pnpm start -- -i lastfm.csv --spotify-input spotify-export/ -m combined --dry-run
 
 # Perform the combined import
-npm start -- -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -- -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 ```
 
 **What combined mode does:**
@@ -111,10 +117,10 @@ Sync your Last.fm export with Teal without creating duplicates:
 
 ```bash
 # Preview what will be synced
-npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync --dry-run
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync --dry-run
 
 # Perform the sync
-npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync -y
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync -y
 ```
 
 **Perfect for:**
@@ -130,52 +136,54 @@ Clean up accidentally imported duplicate records:
 
 ```bash
 # Preview duplicates (dry run)
-npm start -- -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --dry-run
+pnpm start -- -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --dry-run
 
 # Remove duplicates (keeps first occurrence)
-npm start -- -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx
+pnpm start -- -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx
 ```
 
 ### Import from Spotify
 
 ```bash
 # Import single Spotify JSON file
-npm start -- -i Streaming_History_Audio_2021-2023_0.json -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -- -i Streaming_History_Audio_2021-2023_0.json -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 # Import directory with multiple Spotify files (recommended)
-npm start -- -i '/path/to/Spotify Extended Streaming History' -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -- -i '/path/to/Spotify Extended Streaming History' -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 ```
 
 ### Import from Last.fm
 
 ```bash
 # Standard Last.fm import
-npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 # Preview without publishing
-npm start -- -i lastfm.csv --dry-run
+pnpm start -- -i lastfm.csv --dry-run
 
 # Process newest tracks first
-npm start -- -i lastfm.csv -h alice.bsky.social -r -y
+pnpm start -- -i lastfm.csv -h alice.bsky.social -r -y
 
 # Verbose debug output
-npm start -- -i lastfm.csv --dry-run -v
+pnpm start -- -i lastfm.csv --dry-run -v
 
 # Quiet mode (only warnings and errors)
-npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -q -y
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -q -y
 ```
 
 ### Advanced Options
 
 ```bash
 # Custom batch settings (advanced users only)
-npm start -- -i lastfm.csv -h alice.bsky.social -b 20 -d 3000
+pnpm start -- -i lastfm.csv -h alice.bsky.social -b 20 -d 3000
 
 # Full automation with all flags
-npm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
 ```
 
 ## Command Line Options
+
+**Note:** When importing data (not in deduplicate mode), you must provide `--input`, `--handle`, and `--password`. The `--yes` flag skips confirmation prompts for automation.
 
 ### Required Options
 
@@ -256,7 +264,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 - **trackName**: The name of the track
 - **artists**: Array of artist objects (requires `artistName`, optional `artistMbId` for Last.fm)
 - **playedTime**: ISO 8601 timestamp of when you listened
-- **submissionClientAgent**: Identifies this importer (`malachite/v0.6.1`)
+- **submissionClientAgent**: Identifies this importer (`malachite/v0.6.2`)
 - **musicServiceBaseDomain**: Set to `last.fm` or `spotify.com`
 
 ### Optional Fields
@@ -283,7 +291,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
   "recordingMbId": "3a390ad3-fe56-45f2-a073-bebc45d6bde1",
   "playedTime": "2025-11-13T23:49:36Z",
   "originUrl": "https://www.last.fm/music/Cjbeards/_/Paint+My+Masterpiece",
-  "submissionClientAgent": "malachite/v0.6.1",
+  "submissionClientAgent": "malachite/v0.6.2",
   "musicServiceBaseDomain": "last.fm"
 }
 ```
@@ -301,7 +309,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
   "releaseName": "Twenty",
   "playedTime": "2021-09-09T10:34:08Z",
   "originUrl": "https://open.spotify.com/track/3gZqDJkMZipOYCRjlHWgOV",
-  "submissionClientAgent": "malachite/v0.6.1",
+  "submissionClientAgent": "malachite/v0.6.2",
   "musicServiceBaseDomain": "spotify.com"
 }
 ```
@@ -315,10 +323,79 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 2. **Filters data**:
    - Spotify: Automatically removes podcasts, audiobooks, and non-music content
 3. **Converts to schema**: Maps to `fm.teal.alpha.feed.play` format
-4. **Sorts records**: Chronologically (oldest first) or reverse with `-r` flag
-5. **Generates TID-based keys**: From `playedTime` for chronological ordering
-6. **Validates fields**: Ensures required fields are present
-7. **Publishes in batches**: Uses `com.atproto.repo.applyWrites` (up to 200 records per call)
+4. **Deduplicates input**: Removes duplicate entries from the source data (keeps first occurrence)
+5. **Checks Teal**: Fetches existing records and skips any that are already imported (prevents duplicates)
+6. **Sorts records**: Chronologically (oldest first) or reverse with `-r` flag
+7. **Generates TID-based keys**: From `playedTime` for chronological ordering
+8. **Validates fields**: Ensures required fields are present
+9. **Publishes in batches**: Uses `com.atproto.repo.applyWrites` (up to 200 records per call)
+
+### Automatic Duplicate Prevention
+
+The importer has **two layers of duplicate prevention** to ensure you never import the same record twice:
+
+#### Step 1: Input File Deduplication
+
+Removes duplicates within your source file(s):
+
+**How duplicates are identified:**
+- Same track name (case-insensitive)
+- Same artist name (case-insensitive)  
+- Same timestamp (exact match)
+
+**What happens:**
+- First occurrence is kept
+- Subsequent duplicates are removed
+- Shows message: "No duplicates found in input data" or "Removed X duplicate(s)"
+
+#### Step 2: Teal Comparison (Automatic & Adaptive)
+
+**Automatically checks your existing Teal records** and skips any that are already imported:
+
+**What happens:**
+- Fetches all existing records from your Teal feed with **adaptive batch sizing**
+- Starts with small batches (25 records) and automatically adjusts based on network performance
+- Increases batch size (up to 100) when network is fast
+- Decreases batch size (down to 10) when network is slow
+- Shows real-time progress with fetch rate (records/second) and current batch size
+- Compares against your input file
+- Only imports records that don't already exist
+- Shows: "Found X record(s) already in Teal (skipping)"
+
+**Example output:**
+```
+✓ Loaded 10,234 records
+ℹ No duplicates found in input data
+
+=== Checking Existing Records ===
+ℹ Fetching records from Teal to avoid duplicates...
+→ Fetched 1,000 records (125 rec/s, batch: 37, 8.0s)...
+📈 Network good: batch size 37 → 55
+→ Fetched 2,000 records (140 rec/s, batch: 82, 14.3s)...
+📈 Network good: batch size 82 → 100
+→ Fetched 3,000 records (155 rec/s, batch: 100, 19.4s)...
+...
+✓ Found 9,500 existing records in 61.3s (avg 155 rec/s)
+
+=== Identifying New Records ===
+ℹ Total: 10,234 records
+ℹ Existing: 9,100 already in Teal
+ℹ New: 1,134 to import
+```
+
+**This means:**
+- ✅ Safe to re-run imports with updated exports
+- ✅ Won't create duplicates if you run the import twice
+- ✅ Only pays for API calls on new records
+- ✅ Works automatically - no special mode needed
+- ✅ Adapts to your network speed - faster on good connections, stable on slow ones
+- ✅ Batch size shown in debug mode (`-v`) for transparency
+
+**Note:** 
+- This duplicate prevention happens automatically for all imports (default behavior)
+- **Credentials required**: Even `--dry-run` needs `--handle` and `--password` to check Teal
+- **Sync mode** (`-m sync`): Now primarily just shows detailed statistics about what's being synced
+- **Deduplicate mode** (`-m deduplicate`): Removes duplicates from already-imported Teal records (cleanup tool)
 
 ### Rate Limiting Algorithm
 1. Calculates safe daily limit (75% of 10K = 7,500 records/day by default)
@@ -366,17 +443,17 @@ The importer uses color-coded output for clarity:
 
 **Default Mode**: Standard operational messages
 ```bash
-npm start -- -i lastfm.csv -h alice.bsky.social -p pass
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p pass
 ```
 
 **Verbose Mode** (`-v`): Detailed debug information including batch timing and API calls
 ```bash
-npm start -- -i lastfm.csv -h alice.bsky.social -p pass -v
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p pass -v
 ```
 
 **Quiet Mode** (`-q`): Only warnings and errors
 ```bash
-npm start -- -i lastfm.csv -h alice.bsky.social -p pass -q
+pnpm start -- -i lastfm.csv -h alice.bsky.social -p pass -q
 ```
 
 ## Error Handling
@@ -435,19 +512,19 @@ The importer is designed to be resilient:
 
 ```bash
 # Type checking
-npm run type-check
+pnpm run type-check
 
 # Build
-npm run build
+pnpm run build
 
 # Development mode (rebuild + run)
-npm run dev
+pnpm run dev
 
 # Run tests
-npm run test
+pnpm run test
 
 # Clean build artifacts
-npm run clean
+pnpm run clean
 ```
 
 ## Project Structure
