@@ -17,6 +17,14 @@ This importer automatically protects your PDS by:
 
 For more details, see the [Bluesky Rate Limits Documentation](https://docs.bsky.app/blog/rate-limits-pds-v3).
 
+## What’s with the name?
+
+It used to be called `atproto-lastfm-importer` — generic as fuck. That name told you what it did and nothing about why it mattered, and it sounded like a disposable weekend script. So I renamed it.
+
+At the moment, the repository is still called `atproto-lastfm-importer` to avoid link rot. That will probably change to `malachite` later once things settle.
+
+**Malachite** is a greenish-blue copper mineral associated with preservation and transformation. That’s exactly what this tool does: it preserves your scrobbles and transforms them into proper `fm.teal.alpha.feed.play` records on the AT Protocol. The colour match isn’t an accident — malachite sits squarely in the teal/green range, a deliberate nod to the `teal` lexicon it publishes to.
+
 ## Quick Start
 
 **Note:** You must build the project first, then run with arguments.
