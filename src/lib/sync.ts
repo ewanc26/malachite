@@ -3,6 +3,8 @@ import type { PlayRecord, Config } from '../types.js';
 import { formatDate, formatDateRange } from '../utils/helpers.js';
 import * as ui from '../utils/ui.js';
 import { log } from '../utils/logger.js';
+import { isImportCancelled } from '../utils/killswitch.js';
+import { isCacheValid, loadCache, saveCache, getCacheInfo } from '../utils/teal-cache.js';
 
 interface ExistingRecord {
   uri: string;
@@ -21,9 +23,10 @@ interface DuplicateGroup {
  */
 export async function fetchExistingRecords(
   agent: AtpAgent,
-  config: Config
+  config: Config,
+  forceRefresh: boolean = false
 ): Promise<Map<string, ExistingRecord>> {
-  log.section('Fetching Existing Teal Records');
+  log.section('Checking Existing Records');
   const { RECORD_TYPE } = config;
   const did = agent.session?.did;
 
@@ -31,43 +34,136 @@ export async function fetchExistingRecords(
     throw new Error('No authenticated session found');
   }
 
+  // Check cache first (unless force refresh)
+  if (!forceRefresh && isCacheValid(did)) {
+    const cacheInfo = getCacheInfo(did);
+    log.info(`📂 Loading from cache (${cacheInfo.age!.toFixed(1)}h old, ${cacheInfo.records!.toLocaleString()} records)...`);
+    
+    const cached = loadCache(did);
+    if (cached) {
+      // Convert cached records to the format we need
+      const existingRecords = new Map<string, ExistingRecord>();
+      for (const [, record] of cached.entries()) {
+        const playRecord = record.value as PlayRecord;
+        const key = createRecordKey(playRecord);
+        existingRecords.set(key, record as ExistingRecord);
+      }
+      
+      log.success(`✓ Loaded ${existingRecords.size.toLocaleString()} records from cache`);
+      log.blank();
+      return existingRecords;
+    }
+  }
+
+  // Cache miss or force refresh - fetch from Teal
+  if (forceRefresh) {
+    log.info('🔄 Force refresh - fetching from Teal...');
+  } else {
+    log.info('Fetching records from Teal to avoid duplicates...');
+  }
+  
   const existingRecords = new Map<string, ExistingRecord>();
+  const cacheMap = new Map<string, { uri: string; cid: string; value: any }>();
   let cursor: string | undefined = undefined;
   let totalFetched = 0;
+  const startTime = Date.now();
+
+  // Adaptive batch sizing
+  let batchSize = 25; // Start conservative
+  let consecutiveFastRequests = 0;
+  let consecutiveSlowRequests = 0;
+  const TARGET_LATENCY_MS = 2000; // Target 2s per request
+  const MIN_BATCH_SIZE = 10;
+  const MAX_BATCH_SIZE = 100; // AT Protocol maximum
+  let requestCount = 0;
 
   try {
-    // Fetch records in batches using listRecords
+    // Fetch records in batches using listRecords with adaptive sizing
     do {
+      // Check for cancellation
+      if (isImportCancelled()) {
+        log.warn('Fetch cancelled by user');
+        throw new Error('Operation cancelled by user');
+      }
+
+      requestCount++;
+      const requestStart = Date.now();
+      
+      log.debug(`Request #${requestCount}: Fetching batch of ${batchSize}...`);
+      
       const response = await agent.com.atproto.repo.listRecords({
         repo: did,
         collection: RECORD_TYPE,
-        limit: 100,
+        limit: batchSize,
         cursor: cursor,
       });
 
-      for (const record of response.data.records) {
+      const requestLatency = Date.now() - requestStart;
+      const records = response.data.records;
+
+      log.debug(`Request #${requestCount}: Got ${records.length} records in ${requestLatency}ms`);
+
+      // Batch process records for better performance
+      for (const record of records) {
         const playRecord = record.value as unknown as PlayRecord;
-        // Create a unique key based on track, artist, and timestamp
         const key = createRecordKey(playRecord);
-        // Note: This will overwrite duplicates, but that's OK for sync mode
-        // For duplicate detection, we'll need to fetch all records again
-        existingRecords.set(key, {
+        const existingRecord = {
           uri: record.uri,
           cid: record.cid,
           value: playRecord,
-        });
+        };
+        existingRecords.set(key, existingRecord);
+        // Also store for cache (using URI as key for cache)
+        cacheMap.set(record.uri, existingRecord);
       }
 
-      totalFetched += response.data.records.length;
+      totalFetched += records.length;
       cursor = response.data.cursor;
 
-      // Show progress
-      if (totalFetched % 500 === 0 && totalFetched > 0) {
-        log.progress(`Fetched ${totalFetched.toLocaleString()} records...`);
+      // Adaptive batch size adjustment based on latency
+      if (requestLatency < TARGET_LATENCY_MS) {
+        // Request was fast - try to increase batch size
+        consecutiveFastRequests++;
+        consecutiveSlowRequests = 0;
+
+        if (consecutiveFastRequests >= 3 && batchSize < MAX_BATCH_SIZE) {
+          const oldSize = batchSize;
+          batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 1.5));
+          if (oldSize !== batchSize) {
+            log.info(`⚡ Network performing well - increased batch size: ${oldSize} → ${batchSize}`);
+          }
+          consecutiveFastRequests = 0;
+        }
+      } else {
+        // Request was slow - decrease batch size
+        consecutiveSlowRequests++;
+        consecutiveFastRequests = 0;
+
+        if (consecutiveSlowRequests >= 2 && batchSize > MIN_BATCH_SIZE) {
+          const oldSize = batchSize;
+          batchSize = Math.max(MIN_BATCH_SIZE, Math.floor(batchSize * 0.7));
+          log.info(`🐌 Network slow - decreased batch size: ${oldSize} → ${batchSize}`);
+          consecutiveSlowRequests = 0;
+        }
+      }
+
+      // Show progress every 250 records or every request if less than 1000 total
+      const showProgress = totalFetched % 250 === 0 && totalFetched > 0;
+      if (showProgress || totalFetched < 1000) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const rate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
+        log.progress(`Fetched ${totalFetched.toLocaleString()} records (${rate} rec/s, batch: ${batchSize}, ${elapsed}s)...`);
       }
     } while (cursor);
 
-    log.success(`Found ${existingRecords.size.toLocaleString()} existing records`);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const avgRate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
+    log.success(`Found ${existingRecords.size.toLocaleString()} existing records in ${elapsed}s (avg ${avgRate} rec/s)`);
+    
+    // Save to cache
+    log.debug('Saving records to cache...');
+    saveCache(did, cacheMap);
+    
     log.blank();
     return existingRecords;
   } catch (error) {
@@ -96,18 +192,39 @@ export async function fetchAllRecords(
   const allRecords: ExistingRecord[] = [];
   let cursor: string | undefined = undefined;
   let totalFetched = 0;
+  const startTime = Date.now();
+
+  // Adaptive batch sizing
+  let batchSize = 25; // Start conservative
+  let consecutiveFastRequests = 0;
+  let consecutiveSlowRequests = 0;
+  const TARGET_LATENCY_MS = 2000; // Target 2s per request
+  const MIN_BATCH_SIZE = 10;
+  const MAX_BATCH_SIZE = 100; // AT Protocol maximum
+  let requestCount = 0;
 
   try {
-    // Fetch records in batches using listRecords
+    // Fetch records in batches using listRecords with adaptive sizing
     do {
+      // Check for cancellation
+      if (isImportCancelled()) {
+        ui.failSpinner('Fetch cancelled by user');
+        throw new Error('Operation cancelled by user');
+      }
+
+      requestCount++;
+      const requestStart = Date.now();
+
       const response = await agent.com.atproto.repo.listRecords({
         repo: did,
         collection: RECORD_TYPE,
-        limit: 100,
+        limit: batchSize,
         cursor: cursor,
       });
 
-      for (const record of response.data.records) {
+      const requestLatency = Date.now() - requestStart;
+      const records = response.data.records;
+      for (const record of records) {
         const playRecord = record.value as unknown as PlayRecord;
         allRecords.push({
           uri: record.uri,
@@ -116,16 +233,42 @@ export async function fetchAllRecords(
         });
       }
 
-      totalFetched += response.data.records.length;
+      totalFetched += records.length;
       cursor = response.data.cursor;
 
-      // Update spinner with progress
-      if (totalFetched % 500 === 0 && totalFetched > 0) {
-        ui.updateSpinner(`Fetching records... ${totalFetched.toLocaleString()} found`);
+      // Adaptive batch size adjustment based on latency
+      if (requestLatency < TARGET_LATENCY_MS) {
+        // Request was fast - try to increase batch size
+        consecutiveFastRequests++;
+        consecutiveSlowRequests = 0;
+
+        if (consecutiveFastRequests >= 3 && batchSize < MAX_BATCH_SIZE) {
+          batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 1.5));
+          consecutiveFastRequests = 0;
+        }
+      } else {
+        // Request was slow - decrease batch size
+        consecutiveSlowRequests++;
+        consecutiveFastRequests = 0;
+
+        if (consecutiveSlowRequests >= 2 && batchSize > MIN_BATCH_SIZE) {
+          batchSize = Math.max(MIN_BATCH_SIZE, Math.floor(batchSize * 0.7));
+          consecutiveSlowRequests = 0;
+        }
+      }
+
+      // Update spinner with progress every 250 records or every request if less than 1000 total
+      const showProgress = totalFetched % 250 === 0 && totalFetched > 0;
+      if (showProgress || totalFetched < 1000) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const rate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
+        ui.updateSpinner(`Fetching records... ${totalFetched.toLocaleString()} found (${rate} rec/s, batch: ${batchSize}, ${elapsed}s)`);
       }
     } while (cursor);
 
-    ui.succeedSpinner(`Found ${allRecords.length.toLocaleString()} total records`);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const avgRate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
+    ui.succeedSpinner(`Found ${allRecords.length.toLocaleString()} total records in ${elapsed}s (avg ${avgRate} rec/s)`);
     return allRecords;
   } catch (error) {
     ui.failSpinner('Failed to fetch existing records');
@@ -147,6 +290,29 @@ export function createRecordKey(record: PlayRecord): string {
   const normalizedTrack = track.toLowerCase().trim();
 
   return `${normalizedArtist}|||${normalizedTrack}|||${timestamp}`;
+}
+
+/**
+ * Deduplicate input records before submission
+ * Keeps the first occurrence of each duplicate
+ */
+export function deduplicateInputRecords(records: PlayRecord[]): { unique: PlayRecord[]; duplicates: number } {
+  const seen = new Map<string, PlayRecord>();
+  const duplicates: PlayRecord[] = [];
+
+  for (const record of records) {
+    const key = createRecordKey(record);
+    if (!seen.has(key)) {
+      seen.set(key, record);
+    } else {
+      duplicates.push(record);
+    }
+  }
+
+  return {
+    unique: Array.from(seen.values()),
+    duplicates: duplicates.length
+  };
 }
 
 /**

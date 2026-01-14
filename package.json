@@ -1,6 +1,6 @@
 {
   "name": "malachite",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Import Last.fm scrobbles to ATProto with rate limiting",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "npm run build && node dist/index.js",
+    "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js",
     "dry-run": "npm run build && node dist/index.js --dry-run",
     "clean": "rm -rf dist",
