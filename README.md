@@ -2,8 +2,8 @@
 
 Import your Last.fm and Spotify listening history to the AT Protocol network using the `fm.teal.alpha.feed.play` lexicon.
 
-**Repository:** [atproto-lastfm-importer](https://github.com/ewanc26/atproto-lastfm-importer)  
-[Also available on Tangled](https://tangled.org/@did:plc:ofrbh253gwicbkc5nktqepol/atproto-lastfm-importer)
+**Repository:** [malachite](https://github.com/ewanc26/malachite)  
+[Also available on Tangled](https://tangled.org/did:plc:ofrbh253gwicbkc5nktqepol/atproto-lastfm-importer)
 
 ## ⚠️ Important: Rate Limits
 
@@ -21,7 +21,7 @@ For more details, see the [Bluesky Rate Limits Documentation](https://docs.bsky.
 
 It used to be called `atproto-lastfm-importer` — generic as fuck. That name told you what it did and nothing about why it mattered, and it sounded like a disposable weekend script. So I renamed it.
 
-At the moment, the repository is still called `atproto-lastfm-importer` to avoid link rot. That will probably change to `malachite` later once things settle.
+At the moment, the repository is still called `atproto-lastfm-importer` on Tangled, but the GitHub link has been updated to `malachite`. I do not know if this can be resolved.
 
 **Malachite** is a greenish-blue copper mineral associated with preservation and transformation. That’s exactly what this tool does: it preserves your scrobbles and transforms them into proper `fm.teal.alpha.feed.play` records on the AT Protocol. The colour match isn’t an accident — malachite sits squarely in the teal/green range, a deliberate nod to the `teal` lexicon it publishes to.
 
