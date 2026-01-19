@@ -577,10 +577,41 @@ Malachite stores all its data in `~/.malachite/`:
 ~/.malachite/
 ├── cache/          # Cached Teal records (24-hour TTL)
 ├── state/          # Import state for resume functionality
-└── logs/           # Import logs (when file logging is enabled)
+├── logs/           # Import logs (when file logging is enabled)
+└── credentials.json # Encrypted credentials (optional, machine-specific)
 ```
 
 This keeps your project directory clean and follows standard Unix conventions.
+
+### Credential Storage
+
+Malachite can optionally save your ATProto credentials for convenient reuse:
+
+**Security Features:**
+- ✅ **AES-256-GCM encryption** - Military-grade encryption
+- ✅ **Machine-specific** - Credentials are bound to your computer and can't be transferred
+- ✅ **Secure key derivation** - Uses PBKDF2 with 100,000 iterations
+- ✅ **File permissions** - Credentials file is readable only by you (Unix)
+
+**How It Works:**
+1. Interactive mode asks if you want to save credentials after entering them
+2. Credentials are encrypted using a key derived from your hostname + username
+3. Saved to `~/.malachite/credentials.json`
+4. Next time, you'll be prompted to use saved credentials
+
+**Managing Credentials:**
+```bash
+# Clear saved credentials
+pnpm start --clear-credentials
+
+# Or through interactive mode (option 7)
+pnpm start
+```
+
+**Important Notes:**
+- Credentials are machine-specific and won't work if you copy the file to another computer
+- This is a convenience feature - you can always enter credentials manually
+- If you change your password, you'll need to clear and re-save credentials
 
 ## Project Structure
 
