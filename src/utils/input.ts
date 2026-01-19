@@ -1,4 +1,53 @@
 import * as readline from 'readline';
+import chalk from 'chalk';
+
+/**
+ * Display a menu and get user selection
+ */
+export async function menu(title: string, options: Array<{ key: string; label: string; description?: string }>): Promise<string> {
+  console.log(chalk.bold(`\n${title}`));
+  console.log(chalk.gray('─'.repeat(50)));
+  
+  for (const option of options) {
+    if (option.description) {
+      console.log(`  ${chalk.cyan(option.key)}) ${option.label}`);
+      console.log(`     ${chalk.gray(option.description)}`);
+    } else {
+      console.log(`  ${chalk.cyan(option.key)}) ${option.label}`);
+    }
+  }
+  
+  console.log(chalk.gray('─'.repeat(50)));
+  
+  const validKeys = options.map(o => o.key.toLowerCase());
+  let answer = '';
+  
+  while (!validKeys.includes(answer.toLowerCase())) {
+    answer = await prompt('Select an option: ');
+    if (!validKeys.includes(answer.toLowerCase())) {
+      console.log(chalk.red(`Invalid option. Please choose: ${validKeys.join(', ')}`));
+    }
+  }
+  
+  return answer.toLowerCase();
+}
+
+/**
+ * Confirm an action with the user
+ */
+export async function confirm(question: string, defaultYes = false): Promise<boolean> {
+  const suffix = defaultYes ? ' (Y/n) ' : ' (y/N) ';
+  const answer = await prompt(question + suffix);
+  
+  if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+    return true;
+  }
+  if (answer.toLowerCase() === 'n' || answer.toLowerCase() === 'no') {
+    return false;
+  }
+  
+  return defaultYes;
+}
 
 /**
  * Read user input from command line with proper password masking

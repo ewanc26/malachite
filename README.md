@@ -29,11 +29,30 @@ At the moment, the repository is still called `atproto-lastfm-importer` on Tangl
 
 **Note:** You must build the project first, then run with arguments.
 
+### Interactive Mode (Recommended for First-Time Users)
+
+Just run without any arguments and Malachite will guide you through the process:
+
 ```bash
 # Install dependencies and build
 pnpm install
 pnpm build
 
+# Run in interactive mode
+pnpm start
+```
+
+The interactive mode will:
+- Present a menu of available actions
+- Prompt for all required information (handle, password, files)
+- Ask for optional settings (dry run, verbose logging, etc.)
+- Provide helpful descriptions for each option
+
+### Command Line Mode
+
+For automation or if you prefer command-line arguments:
+
+```bash
 # Show help
 pnpm start --help
 
