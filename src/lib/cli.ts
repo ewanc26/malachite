@@ -7,7 +7,7 @@ import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js'
 import { parseSpotifyJson, convertSpotifyToPlayRecord, sortSpotifyRecords } from '../lib/spotify.js';
 import { parseCombinedExports } from '../lib/merge.js';
 import { publishRecordsWithApplyWrites } from './publisher.js';
-import { prompt } from '../utils/input.js';
+import { prompt, menu, confirm } from '../utils/input.js';
 import config from '../config.js';
 import { calculateOptimalBatchSize } from '../utils/helpers.js';
 import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates, deduplicateInputRecords } from './sync.js';
@@ -30,8 +30,9 @@ export function showHelp(): void {
 ${'\x1b[1m'}Malachite v0.6.2${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
-  pnpm start [options]
-  malachite [options]
+  pnpm start                     Run in interactive mode (prompts for all inputs)
+  pnpm start [options]           Run with command-line arguments
+  malachite [options]            Same as above when installed globally
 
 ${'\x1b[1m'}AUTHENTICATION:${'\x1b[0m'}
   -h, --handle <handle>          ATProto handle or DID (e.g., user.bsky.social)
@@ -199,12 +200,103 @@ function validateMode(mode: string): 'lastfm' | 'spotify' | 'combined' | 'sync' 
 }
 
 /**
+ * Interactive mode - prompts user for all required inputs
+ */
+async function runInteractiveMode(): Promise<CommandLineArgs> {
+  console.log('\n' + '='.repeat(60));
+  console.log('  Welcome to Malachite - Interactive Mode');
+  console.log('='.repeat(60) + '\n');
+  
+  // Select mode
+  const mode = await menu('What would you like to do?', [
+    { key: '1', label: 'Import Last.fm scrobbles', description: 'Import from Last.fm CSV export' },
+    { key: '2', label: 'Import Spotify history', description: 'Import from Spotify JSON export' },
+    { key: '3', label: 'Combine Last.fm + Spotify', description: 'Merge both exports (deduplicates)' },
+    { key: '4', label: 'Sync new records', description: 'Only import records not already in Teal' },
+    { key: '5', label: 'Remove duplicates', description: 'Clean up duplicate records in Teal' },
+    { key: '6', label: 'Clear cache', description: 'Clear cached Teal records' },
+    { key: '0', label: 'Exit', description: 'Quit without doing anything' },
+  ]);
+  
+  if (mode === '0') {
+    console.log('\nGoodbye!');
+    process.exit(0);
+  }
+  
+  const args: CommandLineArgs = {};
+  
+  // Map selection to mode
+  if (mode === '1') args.mode = 'lastfm';
+  else if (mode === '2') args.mode = 'spotify';
+  else if (mode === '3') args.mode = 'combined';
+  else if (mode === '4') args.mode = 'sync';
+  else if (mode === '5') args.mode = 'deduplicate';
+  else if (mode === '6') {
+    args['clear-cache'] = true;
+    return args;
+  }
+  
+  console.log('');
+  
+  // Get authentication (not needed for clear cache)
+  if (args.mode === 'deduplicate' || args.mode === 'sync' || args.mode === 'combined' || args.mode === 'lastfm' || args.mode === 'spotify') {
+    args.handle = await prompt('ATProto handle (e.g., alice.bsky.social): ');
+    args.password = await prompt('App password: ', true);
+    console.log('');
+  }
+  
+  // Get input files
+  if (args.mode !== 'deduplicate') {
+    if (args.mode === 'combined') {
+      args.input = await prompt('Path to Last.fm CSV file: ');
+      args['spotify-input'] = await prompt('Path to Spotify export (file or directory): ');
+    } else if (args.mode === 'spotify') {
+      args.input = await prompt('Path to Spotify export (file or directory): ');
+    } else {
+      args.input = await prompt('Path to Last.fm CSV file: ');
+    }
+    console.log('');
+  }
+  
+  // Additional options
+  console.log('\nAdditional Options (press Enter to skip):');
+  console.log('─'.repeat(50));
+  
+  if (args.mode !== 'deduplicate') {
+    const dryRun = await confirm('Preview without importing (dry run)?', false);
+    if (dryRun) args['dry-run'] = true;
+    
+    const verbose = await confirm('Enable verbose logging?', false);
+    if (verbose) args.verbose = true;
+    
+    const reverse = await confirm('Process newest records first?', false);
+    if (reverse) args.reverse = true;
+  }
+  
+  args.yes = true; // Auto-confirm in interactive mode since user already confirmed via prompts
+  
+  return args;
+}
+
+/**
  * The full, real implementation of the CLI
  */
 export async function runCLI(): Promise<void> {
   try {
     registerKillswitch();
-    const args = parseCommandLineArgs();
+    let args = parseCommandLineArgs();
+    
+    // Check if running with no arguments (interactive mode)
+    const hasAnyArgs = Object.keys(args).some(key => {
+      const value = args[key as keyof CommandLineArgs];
+      return value !== undefined && value !== false && value !== 'lastfm'; // lastfm is default mode
+    });
+    
+    if (!hasAnyArgs) {
+      // No arguments provided - run interactive mode
+      args = await runInteractiveMode();
+    }
+    
     const cfg = config as Config;
     let agent: AtpAgent | null = null;
 
