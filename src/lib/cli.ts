@@ -65,6 +65,7 @@ ${'\x1b[1m'}IMPORT OPTIONS:${'\x1b[0m'}
 ${'\x1b[1m'}OUTPUT:${'\x1b[0m'}
   -v, --verbose                  Enable verbose logging (debug level)
   -q, --quiet                    Suppress non-essential output
+  --dev                          Development mode (verbose + file logging + smaller batches)
   --help                         Show this help message
 
 ${'\x1b[1m'}EXAMPLES:${'\x1b[0m'}
@@ -82,6 +83,9 @@ ${'\x1b[1m'}EXAMPLES:${'\x1b[0m'}
 
   ${'\x1b[2m'}# Dry run with verbose logging${'\x1b[0m'}
   pnpm start -i lastfm.csv --dry-run -v
+
+  ${'\x1b[2m'}# Development mode (verbose + file logging + debug batches)${'\x1b[0m'}
+  pnpm start -i lastfm.csv --dev --dry-run
 
   ${'\x1b[2m'}# Remove duplicate records${'\x1b[0m'}
   pnpm start -m deduplicate -h user.bsky.social -p app-password
@@ -126,6 +130,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
     'clear-all-caches': { type: 'boolean', default: false },
     verbose: { type: 'boolean', short: 'v', default: false },
     quiet: { type: 'boolean', short: 'q', default: false },
+    dev: { type: 'boolean', default: false },
     file: { type: 'string', short: 'f' },
     'spotify-file': { type: 'string' },
     identifier: { type: 'string' },
@@ -155,6 +160,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
       'clear-all-caches': values['clear-all-caches'],
       verbose: values.verbose,
       quiet: values.quiet,
+      dev: values.dev,
     };
 
     if (values.mode) {
@@ -202,12 +208,27 @@ export async function runCLI(): Promise<void> {
     const cfg = config as Config;
     let agent: AtpAgent | null = null;
 
+    // Development mode enables verbose logging and file logging
+    const isDev = args.dev ?? false;
+    const isVerbose = args.verbose || isDev;
+    const isQuiet = args.quiet && !isDev; // dev overrides quiet
+
     const logger = new Logger(
-      args.quiet ? LogLevel.WARN :
-      args.verbose ? LogLevel.DEBUG :
+      isQuiet ? LogLevel.WARN :
+      isVerbose ? LogLevel.DEBUG :
       LogLevel.INFO
     );
     setGlobalLogger(logger);
+
+    // Enable file logging in development mode
+    if (isDev) {
+      logger.enableFileLogging();
+      log.info('🔧 Development mode enabled');
+      log.info(`   → Verbose logging: ON`);
+      log.info(`   → File logging: ${log.getLogFile()}`);
+      log.info(`   → Smaller batch sizes for easier debugging`);
+      log.blank();
+    }
 
     if (args.help) {
       showHelp();
@@ -290,7 +311,7 @@ export async function runCLI(): Promise<void> {
     log.section('Loading Records');
     let records: PlayRecord[];
     let rawRecordCount: number;
-    const isDebug = args.verbose ?? false;
+    const isDebug = isVerbose;
 
     if (mode === 'combined') {
       log.info('Merging Last.fm and Spotify exports...');
@@ -373,7 +394,14 @@ export async function runCLI(): Promise<void> {
       log.info(`Using manual batch size: ${batchSize} records`);
     } else {
       batchSize = calculateOptimalBatchSize(totalRecords, batchDelay, cfg);
-      log.info(`Using auto-calculated batch size: ${batchSize} records`);
+      
+      // In dev mode, use smaller batches for easier debugging
+      if (isDev && batchSize > 20) {
+        batchSize = Math.min(20, batchSize);
+        log.info(`Using dev batch size: ${batchSize} records (capped for debugging)`);
+      } else {
+        log.info(`Using auto-calculated batch size: ${batchSize} records`);
+      }
     }
 
     log.info(`Batch delay: ${batchDelay}ms`);
@@ -484,5 +512,8 @@ export async function runCLI(): Promise<void> {
       console.error(err.stack);
     }
     process.exit(1);
+  } finally {
+    // Close log file if it was opened
+    log.closeLogFile();
   }
 }

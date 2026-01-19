@@ -4,6 +4,7 @@
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -35,10 +36,11 @@ export class Logger {
   /**
    * Enable logging to file
    */
-  enableFileLogging(logDir: string = 'logs'): void {
+  enableFileLogging(logDir?: string): void {
     try {
-      // Create logs directory if it doesn't exist
-      const logsPath = path.resolve(process.cwd(), logDir);
+      // Default to ~/.malachite/logs if no directory specified
+      const defaultLogDir = path.join(os.homedir(), '.malachite', 'logs');
+      const logsPath = logDir ? path.resolve(process.cwd(), logDir) : defaultLogDir;
       if (!fs.existsSync(logsPath)) {
         fs.mkdirSync(logsPath, { recursive: true });
       }

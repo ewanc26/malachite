@@ -65,6 +65,7 @@ export interface CommandLineArgs {
   // Output
   verbose?: boolean;
   quiet?: boolean;
+  dev?: boolean;
   
   // Legacy flags (for backwards compatibility)
   file?: string;

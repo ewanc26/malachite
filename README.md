@@ -182,6 +182,9 @@ pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -q -y
 ### Advanced Options
 
 ```bash
+# Development mode (verbose + file logging + smaller batches for debugging)
+pnpm start -i lastfm.csv --dev --dry-run
+
 # Custom batch settings (advanced users only)
 pnpm start -i lastfm.csv -h alice.bsky.social -b 20 -d 3000
 
@@ -217,13 +220,14 @@ pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
 ### Additional Options
 
 | Option | Short | Description | Default |
-|--------|-------|-------------|---------|
+|--------|-------|-------------|---------|  
 | `--spotify-input <path>` | | Path to Spotify export (for combined mode) | - |
 | `--reverse` | `-r` | Process newest first | `false` |
 | `--yes` | `-y` | Skip confirmation prompts | `false` |
 | `--dry-run` | | Preview without importing | `false` |
 | `--verbose` | `-v` | Enable debug logging | `false` |
 | `--quiet` | `-q` | Suppress non-essential output | `false` |
+| `--dev` | | Development mode (verbose + file logging + smaller batches) | `false` |
 | `--batch-size <num>` | `-b` | Records per batch (1-200) | Auto-calculated |
 | `--batch-delay <ms>` | `-d` | Delay between batches in ms | `500` (min) |
 | `--help` | | Show help message | - |
@@ -451,18 +455,29 @@ The importer uses color-coded output for clarity:
 
 **Default Mode**: Standard operational messages
 ```bash
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p pass
+pnpm start -i lastfm.csv -h alice.bsky.social -p pass
 ```
 
 **Verbose Mode** (`-v`): Detailed debug information including batch timing and API calls
 ```bash
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p pass -v
+pnpm start -i lastfm.csv -h alice.bsky.social -p pass -v
 ```
 
 **Quiet Mode** (`-q`): Only warnings and errors
 ```bash
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p pass -q
+pnpm start -i lastfm.csv -h alice.bsky.social -p pass -q
 ```
+
+**Development Mode** (`--dev`): Verbose logging + file logging to `~/.malachite/logs/` + smaller batch sizes
+```bash
+pnpm start -i lastfm.csv --dev --dry-run
+```
+
+Development mode is perfect for:
+- Debugging import issues with detailed logs
+- Testing changes with smaller batches (20 records max)
+- Preserving logs for later analysis
+- Troubleshooting problems with support
 
 ## Error Handling
 
@@ -535,10 +550,23 @@ pnpm run test
 pnpm run clean
 ```
 
+## File Storage
+
+Malachite stores all its data in `~/.malachite/`:
+
+```
+~/.malachite/
+├── cache/          # Cached Teal records (24-hour TTL)
+├── state/          # Import state for resume functionality
+└── logs/           # Import logs (when file logging is enabled)
+```
+
+This keeps your project directory clean and follows standard Unix conventions.
+
 ## Project Structure
 
 ```
-atproto-lastfm-importer/
+malachite/
 ├── src/
 │   ├── lib/
 │   │   ├── auth.ts         # Authentication & identity resolution
