@@ -35,12 +35,12 @@ pnpm install
 pnpm build
 
 # Show help
-pnpm start -- --help
+pnpm start --help
 
 # Run with command line arguments
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
-# Alternative: run directly with node (no -- needed)
+# Alternative: run directly with node
 node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 ```
 
@@ -85,10 +85,10 @@ Merge your Last.fm and Spotify listening history into a single, deduplicated imp
 
 ```bash
 # Preview the merged import
-pnpm start -- -i lastfm.csv --spotify-input spotify-export/ -m combined --dry-run
+pnpm start -i lastfm.csv --spotify-input spotify-export/ -m combined --dry-run
 
 # Perform the combined import
-pnpm start -- -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 ```
 
 **What combined mode does:**
@@ -125,10 +125,10 @@ Sync your Last.fm export with Teal without creating duplicates:
 
 ```bash
 # Preview what will be synced
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync --dry-run
+pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync --dry-run
 
 # Perform the sync
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync -y
+pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync -y
 ```
 
 **Perfect for:**
@@ -144,49 +144,49 @@ Clean up accidentally imported duplicate records:
 
 ```bash
 # Preview duplicates (dry run)
-pnpm start -- -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --dry-run
+pnpm start -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx --dry-run
 
 # Remove duplicates (keeps first occurrence)
-pnpm start -- -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx
+pnpm start -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx
 ```
 
 ### Import from Spotify
 
 ```bash
 # Import single Spotify JSON file
-pnpm start -- -i Streaming_History_Audio_2021-2023_0.json -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -i Streaming_History_Audio_2021-2023_0.json -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 # Import directory with multiple Spotify files (recommended)
-pnpm start -- -i '/path/to/Spotify Extended Streaming History' -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -i '/path/to/Spotify Extended Streaming History' -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 ```
 
 ### Import from Last.fm
 
 ```bash
 # Standard Last.fm import
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 # Preview without publishing
-pnpm start -- -i lastfm.csv --dry-run
+pnpm start -i lastfm.csv --dry-run
 
 # Process newest tracks first
-pnpm start -- -i lastfm.csv -h alice.bsky.social -r -y
+pnpm start -i lastfm.csv -h alice.bsky.social -r -y
 
 # Verbose debug output
-pnpm start -- -i lastfm.csv --dry-run -v
+pnpm start -i lastfm.csv --dry-run -v
 
 # Quiet mode (only warnings and errors)
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -q -y
+pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -q -y
 ```
 
 ### Advanced Options
 
 ```bash
 # Custom batch settings (advanced users only)
-pnpm start -- -i lastfm.csv -h alice.bsky.social -b 20 -d 3000
+pnpm start -i lastfm.csv -h alice.bsky.social -b 20 -d 3000
 
 # Full automation with all flags
-pnpm start -- -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
+pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
 ```
 
 ## Command Line Options

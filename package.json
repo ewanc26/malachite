@@ -1,12 +1,12 @@
 {
   "name": "malachite",
   "version": "0.6.2",
-  "description": "Import Last.fm scrobbles to ATProto with rate limiting",
+  "description": "Malachite - Import Last.fm and Spotify listening history to ATProto with intelligent deduplication and rate limiting",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "lastfm-import": "./dist/index.js"
+    "malachite": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

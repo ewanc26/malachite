@@ -30,8 +30,8 @@ export function showHelp(): void {
 ${'\x1b[1m'}Malachite v0.6.2${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
-  npm start [options]
-  lastfm-import [options]
+  pnpm start [options]
+  malachite [options]
 
 ${'\x1b[1m'}AUTHENTICATION:${'\x1b[0m'}
   -h, --handle <handle>          ATProto handle or DID (e.g., user.bsky.social)
@@ -69,28 +69,28 @@ ${'\x1b[1m'}OUTPUT:${'\x1b[0m'}
 
 ${'\x1b[1m'}EXAMPLES:${'\x1b[0m'}
   ${'\x1b[2m'}# Import Last.fm export${'\x1b[0m'}
-  npm start -- -i lastfm-export.csv -h user.bsky.social -p app-password
+  pnpm start -i lastfm-export.csv -h user.bsky.social -p app-password
 
   ${'\x1b[2m'}# Import Spotify export${'\x1b[0m'}
-  npm start -- -i spotify-export/ -m spotify -h user.bsky.social -p app-password
+  pnpm start -i spotify-export/ -m spotify -h user.bsky.social -p app-password
 
   ${'\x1b[2m'}# Combined import (merge both sources)${'\x1b[0m'}
-  npm start -- -i lastfm.csv --spotify-input spotify/ -m combined -h user.bsky.social -p pass
+  pnpm start -i lastfm.csv --spotify-input spotify/ -m combined -h user.bsky.social -p pass
 
   ${'\x1b[2m'}# Sync mode (only import new records)${'\x1b[0m'}
-  npm start -- -i lastfm.csv -m sync -h user.bsky.social -p app-password
+  pnpm start -i lastfm.csv -m sync -h user.bsky.social -p app-password
 
   ${'\x1b[2m'}# Dry run with verbose logging${'\x1b[0m'}
-  npm start -- -i lastfm.csv --dry-run -v
+  pnpm start -i lastfm.csv --dry-run -v
 
   ${'\x1b[2m'}# Remove duplicate records${'\x1b[0m'}
-  npm start -- -m deduplicate -h user.bsky.social -p app-password
+  pnpm start -m deduplicate -h user.bsky.social -p app-password
 
   ${'\x1b[2m'}# Clear cache for current user${'\x1b[0m'}
-  npm start -- --clear-cache -h user.bsky.social -p app-password
+  pnpm start --clear-cache -h user.bsky.social -p app-password
 
   ${'\x1b[2m'}# Clear all caches${'\x1b[0m'}
-  npm start -- --clear-all-caches
+  pnpm start --clear-all-caches
 
 ${'\x1b[1m'}NOTES:${'\x1b[0m'}
   • Rate limits: Max 10,000 records/day to avoid PDS rate limiting
