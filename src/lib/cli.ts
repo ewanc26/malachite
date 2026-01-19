@@ -27,7 +27,7 @@ import {
  */
 export function showHelp(): void {
   console.log(`
-${'\x1b[1m'}Last.fm to ATProto Importer v0.6.2${'\x1b[0m'}
+${'\x1b[1m'}Malachite v0.6.2${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
   npm start [options]
@@ -99,8 +99,8 @@ ${'\x1b[1m'}NOTES:${'\x1b[0m'}
   • Sync mode requires authentication even with --dry-run
 
 ${'\x1b[1m'}MORE INFO:${'\x1b[0m'}
-  Repository: https://github.com/ewanc26/atproto-lastfm-importer
-  Issues: https://github.com/ewanc26/atproto-lastfm-importer/issues
+  Repository: https://github.com/ewanc26/malachite
+  Issues: https://github.com/ewanc26/malachite/issues
 `);
 }
 
