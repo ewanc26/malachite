@@ -61,6 +61,7 @@ export interface CommandLineArgs {
   fresh?: boolean;
   'clear-cache'?: boolean;
   'clear-all-caches'?: boolean;
+  'clear-credentials'?: boolean;
   
   // Output
   verbose?: boolean;

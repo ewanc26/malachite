@@ -14,6 +14,14 @@ import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplica
 import { Logger, LogLevel, setGlobalLogger, log } from '../utils/logger.js';
 import { registerKillswitch } from '../utils/killswitch.js';
 import { clearCache, clearAllCaches } from '../utils/teal-cache.js';
+import { 
+  saveCredentials, 
+  loadCredentials, 
+  hasStoredCredentials, 
+  clearCredentials,
+  getStoredHandle,
+  getCredentialsInfo 
+} from '../utils/credentials.js';
 import {
   loadImportState,
   createImportState,
@@ -62,6 +70,7 @@ ${'\x1b[1m'}IMPORT OPTIONS:${'\x1b[0m'}
   --fresh                        Start fresh (ignore cache & previous import state)
   --clear-cache                  Clear cached records for current user
   --clear-all-caches             Clear all cached records
+  --clear-credentials            Clear saved credentials
 
 ${'\x1b[1m'}OUTPUT:${'\x1b[0m'}
   -v, --verbose                  Enable verbose logging (debug level)
@@ -97,6 +106,9 @@ ${'\x1b[1m'}EXAMPLES:${'\x1b[0m'}
   ${'\x1b[2m'}# Clear all caches${'\x1b[0m'}
   pnpm start --clear-all-caches
 
+  ${'\x1b[2m'}# Clear saved credentials${'\x1b[0m'}
+  pnpm start --clear-credentials
+
 ${'\x1b[1m'}NOTES:${'\x1b[0m'}
   • Rate limits: Max 10,000 records/day to avoid PDS rate limiting
   • Import will auto-pause between days for large datasets
@@ -129,6 +141,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
     fresh: { type: 'boolean', default: false },
     'clear-cache': { type: 'boolean', default: false },
     'clear-all-caches': { type: 'boolean', default: false },
+    'clear-credentials': { type: 'boolean', default: false },
     verbose: { type: 'boolean', short: 'v', default: false },
     quiet: { type: 'boolean', short: 'q', default: false },
     dev: { type: 'boolean', default: false },
@@ -159,6 +172,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
       fresh: values.fresh,
       'clear-cache': values['clear-cache'],
       'clear-all-caches': values['clear-all-caches'],
+      'clear-credentials': values['clear-credentials'],
       verbose: values.verbose,
       quiet: values.quiet,
       dev: values.dev,
@@ -215,6 +229,7 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
     { key: '4', label: 'Sync new records', description: 'Only import records not already in Teal' },
     { key: '5', label: 'Remove duplicates', description: 'Clean up duplicate records in Teal' },
     { key: '6', label: 'Clear cache', description: 'Clear cached Teal records' },
+    { key: '7', label: 'Clear saved credentials', description: 'Remove saved login credentials' },
     { key: '0', label: 'Exit', description: 'Quit without doing anything' },
   ]);
   
@@ -235,13 +250,49 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
     args['clear-cache'] = true;
     return args;
   }
+  else if (mode === '7') {
+    args['clear-credentials'] = true;
+    return args;
+  }
   
   console.log('');
   
   // Get authentication (not needed for clear cache)
   if (args.mode === 'deduplicate' || args.mode === 'sync' || args.mode === 'combined' || args.mode === 'lastfm' || args.mode === 'spotify') {
-    args.handle = await prompt('ATProto handle (e.g., alice.bsky.social): ');
-    args.password = await prompt('App password: ', true);
+    // Check for saved credentials
+    const savedCreds = hasStoredCredentials();
+    let useSavedCreds = false;
+    
+    if (savedCreds) {
+      const storedHandle = getStoredHandle();
+      console.log(`\n🔑 Found saved credentials for: ${storedHandle}`);
+      useSavedCreds = await confirm('Use saved credentials?', true);
+    }
+    
+    if (useSavedCreds) {
+      const creds = loadCredentials();
+      if (creds) {
+        args.handle = creds.handle;
+        args.password = creds.password;
+        console.log('✓ Loaded saved credentials');
+      } else {
+        console.log('⚠️  Failed to load saved credentials. Please enter manually:');
+        useSavedCreds = false;
+      }
+    }
+    
+    if (!useSavedCreds) {
+      args.handle = await prompt('ATProto handle (e.g., alice.bsky.social): ');
+      args.password = await prompt('App password: ', true);
+      
+      // Offer to save credentials
+      const saveCredsAnswer = await confirm('\nSave credentials for future use? (encrypted, machine-specific)', false);
+      if (saveCredsAnswer) {
+        saveCredentials(args.handle, args.password);
+        console.log('✓ Credentials saved securely to ~/.malachite/credentials.json');
+      }
+    }
+    
     console.log('');
   }
   
@@ -331,6 +382,23 @@ export async function runCLI(): Promise<void> {
       log.section('Clear All Caches');
       clearAllCaches();
       log.success('All caches cleared successfully');
+      return;
+    }
+
+    if (args['clear-credentials']) {
+      log.section('Clear Saved Credentials');
+      if (hasStoredCredentials()) {
+        const info = getCredentialsInfo();
+        if (info) {
+          log.info(`Saved credentials for: ${info.handle}`);
+          log.info(`Created: ${new Date(info.createdAt).toLocaleString()}`);
+          log.info(`Last used: ${new Date(info.lastUsedAt).toLocaleString()}`);
+        }
+        clearCredentials();
+        log.success('Saved credentials cleared successfully');
+      } else {
+        log.info('No saved credentials found');
+      }
       return;
     }
 
