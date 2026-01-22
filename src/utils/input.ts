@@ -2,6 +2,18 @@ import * as readline from 'readline';
 import chalk from 'chalk';
 
 /**
+ * Strip surrounding quotes from a string (single or double quotes)
+ */
+function stripQuotes(str: string): string {
+  str = str.trim();
+  if ((str.startsWith("'") && str.endsWith("'")) || 
+      (str.startsWith('"') && str.endsWith('"'))) {
+    return str.slice(1, -1);
+  }
+  return str;
+}
+
+/**
  * Display a menu and get user selection
  */
 export async function menu(title: string, options: Array<{ key: string; label: string; description?: string }>): Promise<string> {
@@ -113,7 +125,9 @@ export function prompt(question: string, hideInput = false): Promise<string> {
 
       rl.question(question, (answer) => {
         rl.close();
-        resolve(answer);
+        // Strip quotes from file paths
+        const cleaned = stripQuotes(answer);
+        resolve(cleaned);
       });
     }
   });

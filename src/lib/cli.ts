@@ -35,7 +35,7 @@ import {
  */
 export function showHelp(): void {
   console.log(`
-${'\x1b[1m'}Malachite v0.7.0${'\x1b[0m'}
+${'\x1b[1m'}Malachite v0.7.1${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
   pnpm start                     Run in interactive mode (prompts for all inputs)
@@ -282,8 +282,23 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
     }
     
     if (!useSavedCreds) {
-      args.handle = await prompt('ATProto handle (e.g., alice.bsky.social): ');
-      args.password = await prompt('App password: ', true);
+      let handle = '';
+      while (!handle) {
+        handle = await prompt('ATProto handle (e.g., alice.bsky.social): ');
+        if (!handle) {
+          console.log('⚠️  Handle is required. Please try again.');
+        }
+      }
+      args.handle = handle;
+      
+      let password = '';
+      while (!password) {
+        password = await prompt('App password: ', true);
+        if (!password) {
+          console.log('⚠️  Password is required. Please try again.');
+        }
+      }
+      args.password = password;
       
       // Offer to save credentials
       const saveCredsAnswer = await confirm('\nSave credentials for future use? (encrypted, machine-specific)', false);
@@ -299,12 +314,41 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
   // Get input files
   if (args.mode !== 'deduplicate') {
     if (args.mode === 'combined') {
-      args.input = await prompt('Path to Last.fm CSV file: ');
-      args['spotify-input'] = await prompt('Path to Spotify export (file or directory): ');
+      let input = '';
+      while (!input) {
+        input = await prompt('Path to Last.fm CSV file: ');
+        if (!input) {
+          console.log('⚠️  Path is required. Please try again.');
+        }
+      }
+      args.input = input;
+      
+      let spotifyInput = '';
+      while (!spotifyInput) {
+        spotifyInput = await prompt('Path to Spotify export (file or directory): ');
+        if (!spotifyInput) {
+          console.log('⚠️  Path is required. Please try again.');
+        }
+      }
+      args['spotify-input'] = spotifyInput;
     } else if (args.mode === 'spotify') {
-      args.input = await prompt('Path to Spotify export (file or directory): ');
+      let input = '';
+      while (!input) {
+        input = await prompt('Path to Spotify export (file or directory): ');
+        if (!input) {
+          console.log('⚠️  Path is required. Please try again.');
+        }
+      }
+      args.input = input;
     } else {
-      args.input = await prompt('Path to Last.fm CSV file: ');
+      let input = '';
+      while (!input) {
+        input = await prompt('Path to Last.fm CSV file: ');
+        if (!input) {
+          console.log('⚠️  Path is required. Please try again.');
+        }
+      }
+      args.input = input;
     }
     console.log('');
   }
@@ -338,13 +382,23 @@ export async function runCLI(): Promise<void> {
     let args = parseCommandLineArgs();
     
     // Check if running with no arguments (interactive mode)
-    const hasAnyArgs = Object.keys(args).some(key => {
+    // Modifier flags like --dry-run, --verbose, --yes, etc. don't count as "real" arguments
+    const modifierFlags = ['dry-run', 'verbose', 'quiet', 'yes', 'reverse', 'aggressive', 'fresh', 'dev'];
+    const hasSubstantiveArgs = Object.keys(args).some(key => {
       const value = args[key as keyof CommandLineArgs];
-      return value !== undefined && value !== false && value !== 'lastfm'; // lastfm is default mode
+      // Skip undefined, false values, and default mode
+      if (value === undefined || value === false || (key === 'mode' && value === 'lastfm')) {
+        return false;
+      }
+      // Skip modifier flags
+      if (modifierFlags.includes(key)) {
+        return false;
+      }
+      return true;
     });
     
-    if (!hasAnyArgs) {
-      // No arguments provided - run interactive mode
+    if (!hasSubstantiveArgs) {
+      // No substantive arguments provided - run interactive mode
       args = await runInteractiveMode();
     }
     
@@ -434,8 +488,16 @@ export async function runCLI(): Promise<void> {
     }
 
     if (mode === 'deduplicate') {
+      // Try to load saved credentials if not provided
       if (!args.handle || !args.password) {
-        throw new Error('Deduplicate mode requires --handle and --password');
+        const creds = loadCredentials();
+        if (creds) {
+          args.handle = creds.handle;
+          args.password = creds.password;
+          log.info(`Using saved credentials for: ${creds.handle}`);
+        } else {
+          throw new Error('Deduplicate mode requires --handle and --password (or saved credentials)');
+        }
       }
       log.section('Remove Duplicate Records');
       agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
@@ -461,8 +523,16 @@ export async function runCLI(): Promise<void> {
       return;
     }
 
+    // Try to load saved credentials if not provided
     if (!args.handle || !args.password) {
-      throw new Error('Missing required arguments: --handle and --password');
+      const creds = loadCredentials();
+      if (creds) {
+        args.handle = creds.handle;
+        args.password = creds.password;
+        log.info(`Using saved credentials for: ${creds.handle}`);
+      } else {
+        throw new Error('Missing required arguments: --handle and --password (or saved credentials)');
+      }
     }
     log.debug('Authenticating...');
     agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;

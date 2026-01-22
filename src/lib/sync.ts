@@ -147,13 +147,10 @@ export async function fetchExistingRecords(
         }
       }
 
-      // Show progress every 250 records or every request if less than 1000 total
-      const showProgress = totalFetched % 250 === 0 && totalFetched > 0;
-      if (showProgress || totalFetched < 1000) {
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        const rate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
-        log.progress(`Fetched ${totalFetched.toLocaleString()} records (${rate} rec/s, batch: ${batchSize}, ${elapsed}s)...`);
-      }
+      // Show progress on every batch
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const rate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
+      log.progress(`Fetched ${totalFetched.toLocaleString()} records (${rate} rec/s, batch: ${batchSize}, ${elapsed}s)...`);
     } while (cursor);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -257,13 +254,10 @@ export async function fetchAllRecords(
         }
       }
 
-      // Update spinner with progress every 250 records or every request if less than 1000 total
-      const showProgress = totalFetched % 250 === 0 && totalFetched > 0;
-      if (showProgress || totalFetched < 1000) {
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        const rate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
-        ui.updateSpinner(`Fetching records... ${totalFetched.toLocaleString()} found (${rate} rec/s, batch: ${batchSize}, ${elapsed}s)`);
-      }
+      // Update spinner with progress more frequently
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const rate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
+      ui.updateSpinner(`Fetching records... ${totalFetched.toLocaleString()} found (${rate} rec/s, batch: ${batchSize}, ${elapsed}s)`);
     } while (cursor);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
