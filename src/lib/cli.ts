@@ -7,7 +7,7 @@ import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js'
 import { parseSpotifyJson, convertSpotifyToPlayRecord, sortSpotifyRecords } from '../lib/spotify.js';
 import { parseCombinedExports } from '../lib/merge.js';
 import { publishRecordsWithApplyWrites } from './publisher.js';
-import { prompt, menu, confirm } from '../utils/input.js';
+import { prompt, confirm } from '../utils/input.js';
 import config from '../config.js';
 import { calculateOptimalBatchSize } from '../utils/helpers.js';
 import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates, deduplicateInputRecords } from './sync.js';
@@ -217,25 +217,55 @@ function validateMode(mode: string): 'lastfm' | 'spotify' | 'combined' | 'sync' 
  * Interactive mode - prompts user for all required inputs
  */
 async function runInteractiveMode(): Promise<CommandLineArgs> {
-  console.log('\n' + '='.repeat(60));
-  console.log('  Welcome to Malachite - Interactive Mode');
-  console.log('='.repeat(60) + '\n');
+  console.log('\n' + '┏' + '━'.repeat(58) + '┓');
+  console.log('┃' + ' '.repeat(58) + '┃');
+  console.log('┃' + '  Welcome to Malachite - Interactive Mode'.padEnd(58) + '┃');
+  console.log('┃' + ' '.repeat(58) + '┃');
+  console.log('┗' + '━'.repeat(58) + '┛\n');
   
-  // Select mode
-  const mode = await menu('What would you like to do?', [
-    { key: '1', label: 'Import Last.fm scrobbles', description: 'Import from Last.fm CSV export' },
-    { key: '2', label: 'Import Spotify history', description: 'Import from Spotify JSON export' },
-    { key: '3', label: 'Combine Last.fm + Spotify', description: 'Merge both exports (deduplicates)' },
-    { key: '4', label: 'Sync new records', description: 'Only import records not already in Teal' },
-    { key: '5', label: 'Remove duplicates', description: 'Clean up duplicate records in Teal' },
-    { key: '6', label: 'Clear cache', description: 'Clear cached Teal records' },
-    { key: '7', label: 'Clear saved credentials', description: 'Remove saved login credentials' },
-    { key: '0', label: 'Exit', description: 'Quit without doing anything' },
-  ]);
+  console.log('\x1b[1mWhat would you like to do?\x1b[0m\n');
+  console.log('\x1b[36m╭─ IMPORT OPERATIONS ─────────────────────────────╮\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m                                                 \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m  \x1b[1m1\x1b[0m │ Import Last.fm scrobbles                   \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m    │ \x1b[2mFrom Last.fm CSV export\x1b[0m                   \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m                                                 \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m  \x1b[1m2\x1b[0m │ Import Spotify history                     \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m    │ \x1b[2mFrom Spotify JSON export\x1b[0m                  \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m                                                 \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m  \x1b[1m3\x1b[0m │ Combine Last.fm + Spotify                  \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m    │ \x1b[2mMerge both sources with deduplication\x1b[0m     \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m                                                 \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m  \x1b[1m4\x1b[0m │ Sync new records only                      \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m    │ \x1b[2mSkip records already in Teal\x1b[0m              \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m│\x1b[0m                                                 \x1b[36m│\x1b[0m');
+  console.log('\x1b[36m╰─────────────────────────────────────────────────╯\x1b[0m\n');
   
-  if (mode === '0') {
+  console.log('\x1b[33m╭─ MAINTENANCE ───────────────────────────────────╮\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m                                                 \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m  \x1b[1m5\x1b[0m │ Remove duplicate records                   \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m    │ \x1b[2mClean up duplicates in Teal\x1b[0m               \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m                                                 \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m  \x1b[1m6\x1b[0m │ Clear cache                                \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m    │ \x1b[2mRemove cached Teal records\x1b[0m                \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m                                                 \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m  \x1b[1m7\x1b[0m │ Clear saved credentials                    \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m    │ \x1b[2mRemove stored login info\x1b[0m                  \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m│\x1b[0m                                                 \x1b[33m│\x1b[0m');
+  console.log('\x1b[33m╰─────────────────────────────────────────────────╯\x1b[0m\n');
+  
+  console.log('\x1b[90m  0 │ Exit\x1b[0m\n');
+  
+  const mode = await prompt('\x1b[1mEnter your choice [0-7]:\x1b[0m ');
+  
+  if (mode === '0' || !mode) {
     console.log('\nGoodbye!');
     process.exit(0);
+  }
+  
+  // Validate input
+  if (!['1', '2', '3', '4', '5', '6', '7'].includes(mode)) {
+    console.log('\nInvalid choice. Please run again and select a valid option (0-7).');
+    process.exit(1);
   }
   
   const args: CommandLineArgs = {};
