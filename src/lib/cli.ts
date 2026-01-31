@@ -35,7 +35,7 @@ import {
  */
 export function showHelp(): void {
   console.log(`
-${'\x1b[1m'}Malachite v0.7.2${'\x1b[0m'}
+${'\x1b[1m'}Malachite v0.7.3${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
   pnpm start                     Run in interactive mode (prompts for all inputs)
@@ -531,7 +531,7 @@ export async function runCLI(): Promise<void> {
       }
       log.section('Remove Duplicate Records');
       agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
-      const result = await removeDuplicates(agent, cfg, true);
+      const result = await removeDuplicates(agent, cfg, dryRun);
       if (result.totalDuplicates === 0) {
         return;
       }
