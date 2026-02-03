@@ -7,9 +7,10 @@ import { prompt } from '../utils/input.js';
 import { AdaptiveRateLimiter } from '../utils/adaptive-rate-limiter.js';
 
 /**
- * Maximum operations allowed per applyWrites call
+ * Maximum operations allowed per applyWrites call for deletions
+ * Using a lower limit than imports (50 vs 200) to be extra conservative
  */
-const MAX_DELETE_OPS = 200;
+const MAX_DELETE_OPS = 50;
 
 /**
  * Nuke all play records from the user's repository
@@ -99,16 +100,17 @@ export async function nukeAllRecords(
   log.blank();
   
   // Initialize adaptive rate limiter for deletions
-  // Start more conservatively for deletions
+  // VERY CONSERVATIVE settings for deletions to avoid rate limits
   const rateLimiter = new AdaptiveRateLimiter(
     config,
-    Math.min(100, MAX_DELETE_OPS), // Start with 100 records per batch
-    200, // 200ms initial delay
-    MAX_DELETE_OPS
+    20,           // Start with only 20 records per batch (much more conservative)
+    2000,         // 2 second initial delay (10x more conservative than before)
+    MAX_DELETE_OPS // Cap at 50 instead of 200
   );
   
-  log.info(`Initial batch size: ${rateLimiter.getCurrentBatchSize()} records`);
-  log.info(`Initial delay: ${rateLimiter.getCurrentDelay()}ms`);
+  log.info(`Initial batch size: ${rateLimiter.getCurrentBatchSize()} records (very conservative)`);
+  log.info(`Initial delay: ${rateLimiter.getCurrentDelay()}ms (2 seconds between batches)`);
+  log.info(`Deletions are rate-limited more aggressively than imports`);
   log.blank();
   
   // Delete records in batches
