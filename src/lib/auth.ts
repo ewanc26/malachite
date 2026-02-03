@@ -1,6 +1,6 @@
-import { AtpAgent } from '@atproto/api';
 import { prompt } from '../utils/input.js';
 import * as ui from '../utils/ui.js';
+import { SafeAgent } from './safe-agent.js';
 
 interface ResolvedIdentity {
   did: string;
@@ -45,7 +45,7 @@ export async function login(
   identifier: string | undefined,
   password: string | undefined,
   _resolverUrl?: string // Keep parameter for backwards compatibility but don't use it
-): Promise<AtpAgent> {
+): Promise<SafeAgent> {
   ui.header('ATProto Login');
   
   // Prompt for missing credentials
@@ -69,7 +69,7 @@ export async function login(
     
     // Initialize the agent with the resolved PDS URL
     ui.startSpinner('Logging in...');
-    const agent = new AtpAgent({
+    const agent = new SafeAgent({
       service: resolved.pds,
     });
 

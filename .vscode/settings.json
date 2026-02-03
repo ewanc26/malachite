@@ -1,0 +1,25 @@
+{
+    "cSpell.words": [
+        "albumid",
+        "albummbid",
+        "albumname",
+        "artistmbid",
+        "artistname",
+        "atproto",
+        "AUTOINCREMENT",
+        "Brainz",
+        "bsky",
+        "Creds",
+        "dedup",
+        "killswitch",
+        "MBID",
+        "mbids",
+        "rkey",
+        "scrobbles",
+        "Tids",
+        "trackmbid",
+        "trackname",
+        "utctime",
+        "XRPC"
+    ]
+}

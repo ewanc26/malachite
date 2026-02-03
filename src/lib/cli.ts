@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { AtpAgent } from '@atproto/api';
+import { SafeAgent } from './safe-agent.js';
 import type { PlayRecord, Config, CommandLineArgs, PublishResult } from '../types.js';
 import { login } from './auth.js';
+import { nukeWithConfirmation } from './nuke.js';
 import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js';
 import { parseSpotifyJson, convertSpotifyToPlayRecord, sortSpotifyRecords } from '../lib/spotify.js';
 import { parseCombinedExports } from '../lib/merge.js';
@@ -35,7 +36,7 @@ import {
  */
 export function showHelp(): void {
   console.log(`
-${'\x1b[1m'}Malachite v0.7.3${'\x1b[0m'}
+${'\x1b[1m'}Malachite v0.8.0${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
   pnpm start                     Run in interactive mode (prompts for all inputs)
@@ -57,6 +58,7 @@ ${'\x1b[1m'}MODE:${'\x1b[0m'}
                                  combined        Merge Last.fm + Spotify exports
                                  sync            Skip existing records (sync mode)
                                  deduplicate     Remove duplicate records
+                                 nuke            Delete ALL records (DESTRUCTIVE)
 
 ${'\x1b[1m'}BATCH CONFIGURATION:${'\x1b[0m'}
   -b, --batch-size <number>      Records per batch (default: 100)
@@ -204,13 +206,13 @@ export function parseCommandLineArgs(): CommandLineArgs {
 /**
  * Validate and normalize mode
  */
-function validateMode(mode: string): 'lastfm' | 'spotify' | 'combined' | 'sync' | 'deduplicate' {
-  const validModes = ['lastfm', 'spotify', 'combined', 'sync', 'deduplicate'];
+function validateMode(mode: string): 'lastfm' | 'spotify' | 'combined' | 'sync' | 'deduplicate' | 'nuke' {
+  const validModes = ['lastfm', 'spotify', 'combined', 'sync', 'deduplicate', 'nuke'];
   const normalized = mode.toLowerCase();
   if (!validModes.includes(normalized)) {
     throw new Error(`Invalid mode: ${mode}. Must be one of: ${validModes.join(', ')}`);
   }
-  return normalized as 'lastfm' | 'spotify' | 'combined' | 'sync' | 'deduplicate';
+  return normalized as 'lastfm' | 'spotify' | 'combined' | 'sync' | 'deduplicate' | 'nuke';
 }
 
 /**
@@ -253,9 +255,16 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
   console.log('\x1b[33m│\x1b[0m                                                 \x1b[33m│\x1b[0m');
   console.log('\x1b[33m╰─────────────────────────────────────────────────╯\x1b[0m\n');
   
+  console.log('\x1b[31m╭─ DESTRUCTIVE ───────────────────────────────────╮\x1b[0m');
+  console.log('\x1b[31m│\x1b[0m                                                 \x1b[31m│\x1b[0m');
+  console.log('\x1b[31m│\x1b[0m  \x1b[1m8\x1b[0m │ ⚠️  Delete ALL records                     \x1b[31m│\x1b[0m');
+  console.log('\x1b[31m│\x1b[0m    │ \x1b[2mPermanently remove all records (DANGER!)\x1b[0m  \x1b[31m│\x1b[0m');
+  console.log('\x1b[31m│\x1b[0m                                                 \x1b[31m│\x1b[0m');
+  console.log('\x1b[31m╰─────────────────────────────────────────────────╯\x1b[0m\n');
+  
   console.log('\x1b[90m  0 │ Exit\x1b[0m\n');
   
-  const mode = await prompt('\x1b[1mEnter your choice [0-7]:\x1b[0m ');
+  const mode = await prompt('\x1b[1mEnter your choice [0-8]:\x1b[0m ');
   
   if (mode === '0' || !mode) {
     console.log('\nGoodbye!');
@@ -263,8 +272,8 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
   }
   
   // Validate input
-  if (!['1', '2', '3', '4', '5', '6', '7'].includes(mode)) {
-    console.log('\nInvalid choice. Please run again and select a valid option (0-7).');
+  if (!['1', '2', '3', '4', '5', '6', '7', '8'].includes(mode)) {
+    console.log('\nInvalid choice. Please run again and select a valid option (0-8).');
     process.exit(1);
   }
   
@@ -284,11 +293,12 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
     args['clear-credentials'] = true;
     return args;
   }
+  else if (mode === '8') args.mode = 'nuke';
   
   console.log('');
   
   // Get authentication (not needed for clear cache)
-  if (args.mode === 'deduplicate' || args.mode === 'sync' || args.mode === 'combined' || args.mode === 'lastfm' || args.mode === 'spotify') {
+  if (args.mode === 'deduplicate' || args.mode === 'sync' || args.mode === 'combined' || args.mode === 'lastfm' || args.mode === 'spotify' || args.mode === 'nuke') {
     // Check for saved credentials
     const savedCreds = hasStoredCredentials();
     let useSavedCreds = false;
@@ -342,7 +352,7 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
   }
   
   // Get input files
-  if (args.mode !== 'deduplicate') {
+  if (args.mode !== 'deduplicate' && args.mode !== 'nuke') {
     if (args.mode === 'combined') {
       let input = '';
       while (!input) {
@@ -387,7 +397,7 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
   console.log('\nAdditional Options (press Enter to skip):');
   console.log('─'.repeat(50));
   
-  if (args.mode !== 'deduplicate') {
+  if (args.mode !== 'deduplicate' && args.mode !== 'nuke') {
     const dryRun = await confirm('Preview without importing (dry run)?', false);
     if (dryRun) args['dry-run'] = true;
     
@@ -433,7 +443,7 @@ export async function runCLI(): Promise<void> {
     }
     
     const cfg = config as Config;
-    let agent: AtpAgent | null = null;
+    let agent: SafeAgent | null = null;
 
     // Development mode enables verbose logging and file logging
     const isDev = args.dev ?? false;
@@ -492,8 +502,8 @@ export async function runCLI(): Promise<void> {
       }
       log.section('Clear Cache');
       log.info('Authenticating to identify cache...');
-      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
-      const did = agent.session?.did;
+      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER);
+      const did = agent?.session?.did;
       if (!did) {
         throw new Error('Failed to get DID from session');
       }
@@ -513,7 +523,7 @@ export async function runCLI(): Promise<void> {
       if (!args.input || !args['spotify-input']) {
         throw new Error('Combined mode requires both --input (Last.fm) and --spotify-input (Spotify)');
       }
-    } else if (mode !== 'deduplicate' && !args.input) {
+    } else if (mode !== 'deduplicate' && mode !== 'nuke' && !args.input) {
       throw new Error('Missing required argument: --input <path>');
     }
 
@@ -530,7 +540,7 @@ export async function runCLI(): Promise<void> {
         }
       }
       log.section('Remove Duplicate Records');
-      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER);
       const result = await removeDuplicates(agent, cfg, dryRun);
       if (result.totalDuplicates === 0) {
         return;
@@ -553,6 +563,27 @@ export async function runCLI(): Promise<void> {
       return;
     }
 
+    if (mode === 'nuke') {
+      // Try to load saved credentials if not provided
+      if (!args.handle || !args.password) {
+        const creds = loadCredentials();
+        if (creds) {
+          args.handle = creds.handle;
+          args.password = creds.password;
+          log.info(`Using saved credentials for: ${creds.handle}`);
+        } else {
+          throw new Error('Nuke mode requires --handle and --password (or saved credentials)');
+        }
+      }
+      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER);
+      const result = await nukeWithConfirmation(agent, cfg, args.yes ?? false);
+      if (result.cancelled) {
+        log.info('Nuke operation cancelled.');
+        process.exit(0);
+      }
+      return;
+    }
+
     // Try to load saved credentials if not provided
     if (!args.handle || !args.password) {
       const creds = loadCredentials();
@@ -565,7 +596,7 @@ export async function runCLI(): Promise<void> {
       }
     }
     log.debug('Authenticating...');
-    agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+    agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER);
     log.debug('Authentication successful');
 
     log.section('Loading Records');

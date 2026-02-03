@@ -5,6 +5,7 @@ import * as ui from '../utils/ui.js';
 import { log } from '../utils/logger.js';
 import { isImportCancelled } from '../utils/killswitch.js';
 import { isCacheValid, loadCache, saveCache, getCacheInfo } from '../utils/teal-cache.js';
+import { createRecordKey, BatchSizeOptimizer } from '../utils/sync-helpers.js';
 
 interface ExistingRecord {
   uri: string;
@@ -69,12 +70,7 @@ export async function fetchExistingRecords(
   const startTime = Date.now();
 
   // Adaptive batch sizing
-  let batchSize = 25; // Start conservative
-  let consecutiveFastRequests = 0;
-  let consecutiveSlowRequests = 0;
-  const TARGET_LATENCY_MS = 2000; // Target 2s per request
-  const MIN_BATCH_SIZE = 10;
-  const MAX_BATCH_SIZE = 100; // AT Protocol maximum
+  const optimizer = new BatchSizeOptimizer(25); // Start conservative
   let requestCount = 0;
 
   try {
@@ -88,6 +84,7 @@ export async function fetchExistingRecords(
 
       requestCount++;
       const requestStart = Date.now();
+      const batchSize = optimizer.getBatchSize();
       
       log.debug(`Request #${requestCount}: Fetching batch of ${batchSize}...`);
       
@@ -120,32 +117,8 @@ export async function fetchExistingRecords(
       totalFetched += records.length;
       cursor = response.data.cursor;
 
-      // Adaptive batch size adjustment based on latency
-      if (requestLatency < TARGET_LATENCY_MS) {
-        // Request was fast - try to increase batch size
-        consecutiveFastRequests++;
-        consecutiveSlowRequests = 0;
-
-        if (consecutiveFastRequests >= 3 && batchSize < MAX_BATCH_SIZE) {
-          const oldSize = batchSize;
-          batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 1.5));
-          if (oldSize !== batchSize) {
-            log.info(`⚡ Network performing well - increased batch size: ${oldSize} → ${batchSize}`);
-          }
-          consecutiveFastRequests = 0;
-        }
-      } else {
-        // Request was slow - decrease batch size
-        consecutiveSlowRequests++;
-        consecutiveFastRequests = 0;
-
-        if (consecutiveSlowRequests >= 2 && batchSize > MIN_BATCH_SIZE) {
-          const oldSize = batchSize;
-          batchSize = Math.max(MIN_BATCH_SIZE, Math.floor(batchSize * 0.7));
-          log.info(`🐌 Network slow - decreased batch size: ${oldSize} → ${batchSize}`);
-          consecutiveSlowRequests = 0;
-        }
-      }
+      // Update optimizer with request latency
+      optimizer.onRequest(requestLatency);
 
       // Show progress on every batch
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -192,12 +165,7 @@ export async function fetchAllRecords(
   const startTime = Date.now();
 
   // Adaptive batch sizing
-  let batchSize = 25; // Start conservative
-  let consecutiveFastRequests = 0;
-  let consecutiveSlowRequests = 0;
-  const TARGET_LATENCY_MS = 2000; // Target 2s per request
-  const MIN_BATCH_SIZE = 10;
-  const MAX_BATCH_SIZE = 100; // AT Protocol maximum
+  const optimizer = new BatchSizeOptimizer(25); // Start conservative
   let requestCount = 0;
 
   try {
@@ -211,6 +179,7 @@ export async function fetchAllRecords(
 
       requestCount++;
       const requestStart = Date.now();
+      const batchSize = optimizer.getBatchSize();
 
       const response = await agent.com.atproto.repo.listRecords({
         repo: did,
@@ -233,26 +202,8 @@ export async function fetchAllRecords(
       totalFetched += records.length;
       cursor = response.data.cursor;
 
-      // Adaptive batch size adjustment based on latency
-      if (requestLatency < TARGET_LATENCY_MS) {
-        // Request was fast - try to increase batch size
-        consecutiveFastRequests++;
-        consecutiveSlowRequests = 0;
-
-        if (consecutiveFastRequests >= 3 && batchSize < MAX_BATCH_SIZE) {
-          batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 1.5));
-          consecutiveFastRequests = 0;
-        }
-      } else {
-        // Request was slow - decrease batch size
-        consecutiveSlowRequests++;
-        consecutiveFastRequests = 0;
-
-        if (consecutiveSlowRequests >= 2 && batchSize > MIN_BATCH_SIZE) {
-          batchSize = Math.max(MIN_BATCH_SIZE, Math.floor(batchSize * 0.7));
-          consecutiveSlowRequests = 0;
-        }
-      }
+      // Update optimizer with request latency
+      optimizer.onRequest(requestLatency);
 
       // Update spinner with progress more frequently
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -270,21 +221,8 @@ export async function fetchAllRecords(
   }
 }
 
-/**
- * Create a unique key for a play record based on its essential properties
- * This is used to identify duplicates
- */
-export function createRecordKey(record: PlayRecord): string {
-  const artist = record.artists[0]?.artistName || '';
-  const track = record.trackName;
-  const timestamp = record.playedTime;
-
-  // Normalize strings to handle case and whitespace differences
-  const normalizedArtist = artist.toLowerCase().trim();
-  const normalizedTrack = track.toLowerCase().trim();
-
-  return `${normalizedArtist}|||${normalizedTrack}|||${timestamp}`;
-}
+// Re-export for backward compatibility
+export { createRecordKey };
 
 /**
  * Deduplicate input records before submission

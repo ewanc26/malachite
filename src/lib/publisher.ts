@@ -16,14 +16,8 @@ import {
   completeImport,
   getResumeStartIndex,
 } from '../utils/import-state.js';
-
-/**
- * Maximum operations allowed per applyWrites call
- * PDS allows up to 200 operations per call. Each create operation costs 3 rate limit points.
- * We use the full limit for maximum performance.
- * See: https://github.com/bluesky-social/atproto/blob/main/packages/pds/src/api/com/atproto/repo/applyWrites.ts
- */
-const MAX_APPLY_WRITES_OPS = 200;
+import { handleCancellation } from '../utils/publisher-helpers.js';
+import { MAX_APPLY_WRITES_OPS } from '../constants.js';
 
 /**
  * Publish records using com.atproto.repo.applyWrites for efficient batching
@@ -358,17 +352,4 @@ function handleDryRun(
   return { successCount: totalRecords, errorCount: 0, cancelled: false };
 }
 
-/**
- * Handle cancellation
- */
-function handleCancellation(
-  successCount: number,
-  errorCount: number,
-  totalRecords: number
-): PublishResult {
-  log.blank();
-  log.warn('Import cancelled by user');
-  log.info(`Processed: ${successCount.toLocaleString()}/${totalRecords.toLocaleString()} records`);
-  log.info(`Remaining: ${(totalRecords - successCount).toLocaleString()} records`);
-  return { successCount, errorCount, cancelled: true };
-}
+
