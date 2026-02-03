@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { parse } from 'csv-parse';
-import type { LastFmCsvRecord, PlayRecord, Config } from '../types.js';
+import type { PlayRecord, Config } from '../types.js';
 import { StreamDB } from '../utils/stream-db.js';
 import { log } from '../utils/logger.js';
 import { normalizeColumns, convertToPlayRecord } from '../utils/csv-helpers.js';

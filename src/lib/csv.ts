@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { parse } from 'csv-parse/sync';
-import type { LastFmCsvRecord, PlayRecord, Config } from '../types.js';
+import type { LastFmCsvRecord, PlayRecord } from '../types.js';
 import { formatDate } from '../utils/helpers.js';
 import { normalizeColumns, convertToPlayRecord } from '../utils/csv-helpers.js';
 
