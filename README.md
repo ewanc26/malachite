@@ -10,12 +10,39 @@ Import your Last.fm and Spotify listening history to the AT Protocol network usi
 **CRITICAL**: Bluesky's AppView has rate limits on PDS instances. Exceeding 10K records per day can rate limit your **ENTIRE PDS**, affecting all users on your instance.
 
 This importer automatically protects your PDS by:
+
 - Limiting imports to **1,000 records per day** (with 75% safety margin)
 - Calculating optimal batch sizes and delays
 - Pausing 24 hours between days for large imports
 - Providing clear progress tracking and time estimates
 
 For more details, see the [Bluesky Rate Limits Documentation](https://docs.bsky.app/blog/rate-limits-pds-v3).
+
+### å ⚠️ Disclaimer: Rate Limiting During Record Operations
+
+While Malachite implements protective rate limiting, **you may still experience rate limiting** when creating or deleting records, particularly if:
+
+- Your PDS or AppView is already under load
+- You're on a shared PDS with other active users
+- The AT Protocol network is experiencing congestion
+- You exceed safe thresholds during bulk operations
+
+**What this means:**
+
+- Creating records may take longer than expected
+- Deletion operations may be throttled
+- Some requests may fail temporarily and require retry
+- The importer may need to pause or backoff automatically
+å
+**Recommendations:**
+
+- Use **dry-run mode** first to estimate import size and time
+- Start with smaller batches if you experience delays
+- Consider running imports during off-peak hours
+- Be patient — the importer will retry failed operations automatically
+- Monitor logs with `-v` (verbose) or `--dev` flags for detailed information
+
+The importer is designed to handle rate limiting gracefully, but it cannot guarantee you won't experience delays or temporary failures.
 
 ## What’s with the name?
 
@@ -43,6 +70,7 @@ pnpm start
 ```
 
 The interactive mode will:
+
 - Present a menu of available actions
 - Prompt for all required information (handle, password, files)
 - Ask for optional settings (dry run, verbose logging, etc.)
@@ -66,6 +94,7 @@ node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 ## Features
 
 ### Import Capabilities
+
 - ✅ **Last.fm Import**: Full support for Last.fm CSV exports with MusicBrainz IDs
 - ✅ **Spotify Import**: Import Extended Streaming History JSON files
 - ✅ **Combined Import**: Merge Last.fm and Spotify exports with intelligent deduplication
@@ -73,6 +102,7 @@ node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 - ✅ **Duplicate Removal**: Clean up accidentally imported duplicate records
 
 ### Performance & Safety
+
 - ✅ **Automatic Duplicate Prevention**: Automatically checks Teal and skips records that already exist (no duplicates!)
 - ✅ **Input Deduplication**: Removes duplicate entries within the source file before submission
 - ✅ **Batch Operations**: Uses `com.atproto.repo.applyWrites` for efficient batch publishing (up to 200 records per call)
@@ -82,6 +112,7 @@ node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 - ✅ **Graceful Cancellation**: Press Ctrl+C to stop after the current batch completes
 
 ### User Experience
+
 - ✅ **Structured Logging**: Color-coded output with debug/verbose modes
 - ✅ **Progress Tracking**: Real-time progress with time estimates
 - ✅ **Dry Run Mode**: Preview records without publishing
@@ -89,6 +120,7 @@ node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 - ✅ **Command Line Mode**: Full automation support for scripting
 
 ### Technical Features
+
 - ✅ **TID-based Record Keys**: Timestamp-based identifiers for chronological ordering
 - ✅ **Identity Resolution**: Resolves ATProto handles/DIDs using Slingshot
 - ✅ **PDS Auto-Discovery**: Automatically connects to your personal PDS
@@ -111,6 +143,7 @@ pnpm start -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bs
 ```
 
 **What combined mode does:**
+
 1. Parses both Last.fm CSV and Spotify JSON exports
 2. Normalizes track names and artist names for comparison
 3. Identifies duplicate plays (same track within 5 minutes)
@@ -119,6 +152,7 @@ pnpm start -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bs
 6. Shows detailed statistics about the merge
 
 **Example output:**
+
 ```
 📊 Merge Statistics
 ═══════════════════════════════════════════
@@ -151,6 +185,7 @@ pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -m sync -y
 ```
 
 **Perfect for:**
+
 - Re-running imports with updated Last.fm exports
 - Recovering from interrupted imports
 - Adding recent scrobbles without duplicating old ones
@@ -230,6 +265,7 @@ pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
 | `--mode <mode>` | `-m` | Import mode | `lastfm` |
 
 **Available modes:**
+
 - `lastfm` - Import Last.fm export only
 - `spotify` - Import Spotify export only  
 - `combined` - Merge Last.fm + Spotify exports
@@ -254,6 +290,7 @@ pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
 ### Legacy Flags (Backwards Compatible)
 
 These old flags still work but are deprecated:
+
 - `--file` → Use `--input`
 - `--identifier` → Use `--handle`
 - `--spotify-file` → Use `--spotify-input`
@@ -283,6 +320,7 @@ These old flags still work but are deprecated:
    - The entire extracted directory (recommended)
 
 **Note:** The importer automatically:
+
 - Reads all `Streaming_History_Audio_*.json` files in a directory
 - Filters out podcasts, audiobooks, and non-music content
 - Combines all music tracks into a single import
@@ -292,6 +330,7 @@ These old flags still work but are deprecated:
 Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 
 ### Required Fields
+
 - **trackName**: The name of the track
 - **artists**: Array of artist objects (requires `artistName`, optional `artistMbId` for Last.fm)
 - **playedTime**: ISO 8601 timestamp of when you listened
@@ -299,6 +338,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 - **musicServiceBaseDomain**: Set to `last.fm` or `spotify.com`
 
 ### Optional Fields
+
 - **releaseName**: Album/release name
 - **releaseMbId**: MusicBrainz release ID (Last.fm only)
 - **recordingMbId**: MusicBrainz recording/track ID (Last.fm only)
@@ -307,6 +347,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 ### Example Records
 
 **Last.fm Record:**
+
 ```json
 {
   "$type": "fm.teal.alpha.feed.play",
@@ -328,6 +369,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 ```
 
 **Spotify Record:**
+
 ```json
 {
   "$type": "fm.teal.alpha.feed.play",
@@ -348,6 +390,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 ## How It Works
 
 ### Processing Flow
+
 1. **Parses input file(s)**:
    - Last.fm: CSV using `csv-parse` library
    - Spotify: JSON files (single or multiple in directory)
@@ -370,11 +413,13 @@ The importer has **two layers of duplicate prevention** to ensure you never impo
 Removes duplicates within your source file(s):
 
 **How duplicates are identified:**
+
 - Same track name (case-insensitive)
 - Same artist name (case-insensitive)  
 - Same timestamp (exact match)
 
 **What happens:**
+
 - First occurrence is kept
 - Subsequent duplicates are removed
 - Shows message: "No duplicates found in input data" or "Removed X duplicate(s)"
@@ -384,6 +429,7 @@ Removes duplicates within your source file(s):
 **Automatically checks your existing Teal records** and skips any that are already imported:
 
 **What happens:**
+
 - Fetches all existing records from your Teal feed with **adaptive batch sizing**
 - Starts with small batches (25 records) and automatically adjusts based on network performance
 - Increases batch size (up to 100) when network is fast
@@ -394,6 +440,7 @@ Removes duplicates within your source file(s):
 - Shows: "Found X record(s) already in Teal (skipping)"
 
 **Example output:**
+
 ```
 ✓ Loaded 10,234 records
 ℹ No duplicates found in input data
@@ -415,6 +462,7 @@ Removes duplicates within your source file(s):
 ```
 
 **This means:**
+
 - ✅ Safe to re-run imports with updated exports
 - ✅ Won't create duplicates if you run the import twice
 - ✅ Only pays for API calls on new records
@@ -422,13 +470,15 @@ Removes duplicates within your source file(s):
 - ✅ Adapts to your network speed - faster on good connections, stable on slow ones
 - ✅ Batch size shown in debug mode (`-v`) for transparency
 
-**Note:** 
+**Note:**
+
 - This duplicate prevention happens automatically for all imports (default behavior)
 - **Credentials required**: Even `--dry-run` needs `--handle` and `--password` to check Teal
 - **Sync mode** (`-m sync`): Now primarily just shows detailed statistics about what's being synced
 - **Deduplicate mode** (`-m deduplicate`): Removes duplicates from already-imported Teal records (cleanup tool)
 
 ### Rate Limiting Algorithm
+
 1. Calculates safe daily limit (75% of 10K = 7,500 records/day by default)
 2. Determines how many days needed for your import
 3. Calculates optimal batch size and delay to spread records evenly
@@ -438,6 +488,7 @@ Removes duplicates within your source file(s):
 ### Multi-Day Imports
 
 For imports exceeding the daily limit, the importer automatically:
+
 1. **Calculates a schedule**: Splits your import across multiple days
 2. **Shows the plan**: Displays which records will be imported each day
 3. **Processes Day 1**: Imports the first batch of records
@@ -445,6 +496,7 @@ For imports exceeding the daily limit, the importer automatically:
 5. **Repeats**: Continues until all records are imported
 
 **Example output for a 20,000 record import:**
+
 ```
 📊 Rate Limiting Information:
    Total records: 20,000
@@ -455,6 +507,7 @@ For imports exceeding the daily limit, the importer automatically:
 ```
 
 **Important notes:**
+
 - You can safely stop (Ctrl+C) and restart
 - Progress is preserved - continues where it left off
 - Each day's progress is clearly displayed
@@ -473,26 +526,31 @@ The importer uses color-coded output for clarity:
 ### Verbosity Levels
 
 **Default Mode**: Standard operational messages
+
 ```bash
 pnpm start -i lastfm.csv -h alice.bsky.social -p pass
 ```
 
 **Verbose Mode** (`-v`): Detailed debug information including batch timing and API calls
+
 ```bash
 pnpm start -i lastfm.csv -h alice.bsky.social -p pass -v
 ```
 
 **Quiet Mode** (`-q`): Only warnings and errors
+
 ```bash
 pnpm start -i lastfm.csv -h alice.bsky.social -p pass -q
 ```
 
 **Development Mode** (`--dev`): Verbose logging + file logging to `~/.malachite/logs/` + smaller batch sizes
+
 ```bash
 pnpm start -i lastfm.csv --dev --dry-run
 ```
 
 Development mode is perfect for:
+
 - Debugging import issues with detailed logs
 - Testing changes with smaller batches (20 records max)
 - Preserving logs for later analysis
@@ -513,21 +571,25 @@ The importer is designed to be resilient:
 ### Authentication Issues
 
 **"Handle not found"**
+
 - Verify your ATProto handle is correct (e.g., `alice.bsky.social`)
 - Ensure you're using a valid DID or handle
 
 **"Invalid credentials"**
+
 - Use an **app password**, not your main account password
 - Generate app passwords in your account settings
 
 ### Performance Issues
 
 **"Rate limit exceeded"**
+
 - The importer should prevent this automatically
 - If you see this, wait 24 hours before retrying
 - Consider reducing batch size with `-b` flag
 
 **Import seems stuck**
+
 - Check progress messages - large imports take time
 - Multi-day imports pause for 24 hours between days
 - You can safely stop (Ctrl+C) and resume later
@@ -536,6 +598,7 @@ The importer is designed to be resilient:
 ### Connection Issues
 
 **"Connection refused"**
+
 - Check your internet connection
 - Verify your PDS is accessible
 - Some PDSs may have firewall rules
@@ -543,10 +606,12 @@ The importer is designed to be resilient:
 ### Output Control
 
 **Too much output**
+
 - Use `--quiet` flag to suppress non-essential messages
 - Only warnings and errors will be shown
 
 **Need more details**
+
 - Use `--verbose` flag to see debug-level information
 - Shows batch timing, API calls, and detailed progress
 
@@ -588,18 +653,21 @@ This keeps your project directory clean and follows standard Unix conventions.
 Malachite can optionally save your ATProto credentials for convenient reuse:
 
 **Security Features:**
+
 - ✅ **AES-256-GCM encryption** - Military-grade encryption
 - ✅ **Machine-specific** - Credentials are bound to your computer and can't be transferred
 - ✅ **Secure key derivation** - Uses PBKDF2 with 100,000 iterations
 - ✅ **File permissions** - Credentials file is readable only by you (Unix)
 
 **How It Works:**
+
 1. Interactive mode asks if you want to save credentials after entering them
 2. Credentials are encrypted using a key derived from your hostname + username
 3. Saved to `~/.malachite/credentials.json`
 4. Next time, you'll be prompted to use saved credentials
 
 **Managing Credentials:**
+
 ```bash
 # Clear saved credentials
 pnpm start --clear-credentials
@@ -609,6 +677,7 @@ pnpm start
 ```
 
 **Important Notes:**
+
 - Credentials are machine-specific and won't work if you copy the file to another computer
 - This is a convenience feature - you can always enter credentials manually
 - If you change your password, you'll need to clear and re-save credentials
@@ -648,11 +717,13 @@ malachite/
 ## Technical Details
 
 ### Authentication
+
 - Uses Slingshot resolver to discover your PDS from your handle/DID
 - Requires an ATProto app password (not your main password)
 - Automatically configures the agent for your personal PDS
 
 ### Batch Publishing
+
 - Uses `com.atproto.repo.applyWrites` for efficiency (up to 20x faster than individual calls)
 - Batches up to 200 records per API call (PDS maximum)
 - Automatically adjusts batch size based on total record count
@@ -661,6 +732,7 @@ malachite/
 ### Data Mapping
 
 **Last.fm:**
+
 - Direct mapping from CSV columns
 - Converts Unix timestamps to ISO 8601
 - Preserves MusicBrainz IDs when present
@@ -668,6 +740,7 @@ malachite/
 - Wraps artists in array format with optional MBID
 
 **Spotify:**
+
 - Extracts data from JSON fields
 - Already in ISO 8601 format (`ts` field)
 - Generates URLs from `spotify_track_uri`
@@ -683,6 +756,7 @@ The lexicon defines required and optional field types, string length constraints
 ## Contributing
 
 Contributions are welcome! Please:
+
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes with tests

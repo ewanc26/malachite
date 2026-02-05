@@ -197,7 +197,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
     return normalizedArgs;
   } catch (error) {
     const err = error as Error;
-    console.error('Error parsing arguments:', err.message);
+    log.error(`Failed to parse arguments: ${err.message}`);
     showHelp();
     process.exit(1);
   }

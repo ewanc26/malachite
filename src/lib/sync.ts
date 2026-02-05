@@ -27,7 +27,7 @@ export async function fetchExistingRecords(
   config: Config,
   forceRefresh: boolean = false
 ): Promise<Map<string, ExistingRecord>> {
-  log.section('Checking Existing Records');
+  log.section('Fetching Existing Records');
   const { RECORD_TYPE } = config;
   const did = agent.session?.did;
 
@@ -38,7 +38,9 @@ export async function fetchExistingRecords(
   // Check cache first (unless force refresh)
   if (!forceRefresh && isCacheValid(did)) {
     const cacheInfo = getCacheInfo(did);
-    log.info(`📂 Loading from cache (${cacheInfo.age!.toFixed(1)}h old, ${cacheInfo.records!.toLocaleString()} records)...`);
+    const age = cacheInfo.age!.toFixed(1);
+    const count = cacheInfo.records!.toLocaleString();
+    log.info(`Using cached records (${age}h old, ${count} records)`);
     
     const cached = loadCache(did);
     if (cached) {
@@ -50,7 +52,7 @@ export async function fetchExistingRecords(
         existingRecords.set(key, record as ExistingRecord);
       }
       
-      log.success(`✓ Loaded ${existingRecords.size.toLocaleString()} records from cache`);
+      log.success(`Loaded ${existingRecords.size.toLocaleString()} records from cache`);
       log.blank();
       return existingRecords;
     }
@@ -58,9 +60,9 @@ export async function fetchExistingRecords(
 
   // Cache miss or force refresh - fetch from Teal
   if (forceRefresh) {
-    log.info('🔄 Force refresh - fetching from Teal...');
+    log.info('Force refresh: fetching fresh data from Teal');
   } else {
-    log.info('Fetching records from Teal to avoid duplicates...');
+    log.info('Cache miss: fetching records from Teal to detect duplicates');
   }
   
   const existingRecords = new Map<string, ExistingRecord>();
@@ -128,7 +130,7 @@ export async function fetchExistingRecords(
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const avgRate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
-    log.success(`Found ${existingRecords.size.toLocaleString()} existing records in ${elapsed}s (avg ${avgRate} rec/s)`);
+    log.success(`Fetched ${existingRecords.size.toLocaleString()} records in ${elapsed}s (avg ${avgRate} rec/s)`);
     
     // Save to cache
     log.debug('Saving records to cache...');

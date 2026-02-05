@@ -3,6 +3,7 @@ import { parse } from 'csv-parse/sync';
 import type { LastFmCsvRecord, PlayRecord } from '../types.js';
 import { formatDate } from '../utils/helpers.js';
 import { normalizeColumns, convertToPlayRecord } from '../utils/csv-helpers.js';
+import { log } from '../utils/logger.js';
 
 /**
  * Detect CSV delimiter by checking first line
@@ -29,7 +30,7 @@ function detectDelimiter(content: string): string {
  * Parse Last.fm CSV export with dynamic delimiter detection and column mapping
  */
 export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
-  console.log(`Reading CSV file: ${filePath}`);
+  log.progress(`Reading CSV file: ${filePath}`);
   let fileContent = fs.readFileSync(filePath, 'utf-8');
   
   // Remove BOM if present
@@ -47,7 +48,7 @@ export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
   
   // Detect delimiter
   const delimiter = detectDelimiter(fileContent);
-  console.log(`  Detected delimiter: "${delimiter}"`);
+  log.debug(`Detected delimiter: "${delimiter}"`);
   
   try {
     const rawRecords = parse(fileContent, {
@@ -68,17 +69,17 @@ export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
     });
     
     if (validRecords.length === 0) {
-      console.error('\n⚠️  Warning: No valid records found after parsing.');
-      console.error('   Required fields: artist, track, and timestamp');
-      console.error('   Available columns:', Object.keys(rawRecords[0] || {}));
+      log.warn('No valid records found in CSV after parsing');
+      log.warn('Required fields: artist, track, and timestamp');
+      log.debug('Available columns: ' + Object.keys(rawRecords[0] || {}).join(', '));
     }
     
-    console.log(`✓ Parsed ${validRecords.length} scrobbles\n`);
+    log.success(`Parsed ${validRecords.length.toLocaleString()} scrobbles from CSV`);
     return validRecords;
   } catch (error) {
-    console.error('\n🛑 CSV parsing failed:');
-    console.error('   ', error);
-    console.error('\n   Tip: Make sure your CSV has columns for artist, track, and timestamp');
+    log.error('CSV parsing failed');
+    log.error((error as Error).message);
+    log.error('Tip: Make sure your CSV has columns for artist, track, and timestamp');
     throw error;
   }
 }
@@ -87,7 +88,7 @@ export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
  * Sort records chronologically
  */
 export function sortRecords(records: PlayRecord[], reverseChronological = false): PlayRecord[] {
-  console.log(`Sorting records ${reverseChronological ? 'newest' : 'oldest'} first...`);
+  log.progress(`Sorting ${records.length.toLocaleString()} records (${reverseChronological ? 'newest' : 'oldest'} first)...`);
 
   records.sort((a, b) => {
     const timeA = new Date(a.playedTime).getTime();
@@ -97,9 +98,9 @@ export function sortRecords(records: PlayRecord[], reverseChronological = false)
 
   const firstPlay = formatDate(records[0].playedTime);
   const lastPlay = formatDate(records[records.length - 1].playedTime);
-  console.log(`✓ Sorted ${records.length} records`);
-  console.log(`  First: ${firstPlay}`);
-  console.log(`  Last: ${lastPlay}\n`);
+  log.success(`Sorted ${records.length.toLocaleString()} records`);
+  log.info(`  Range: ${firstPlay} to ${lastPlay}`);
+  log.blank();
 
   return records;
 }

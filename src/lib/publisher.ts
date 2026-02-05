@@ -53,14 +53,12 @@ export async function publishRecordsWithApplyWrites(
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
 
-  log.section('Conservative Adaptive Import');
-  log.info(`Initial batch size: ${currentBatchSize} records (conservative)`);
-  log.info(`Initial delay: ${currentBatchDelay}ms (2 seconds - very safe)`);
-  log.info(`Will automatically adjust based on server response`);
-  log.info(`Using conservative settings to protect your PDS`);
+  log.section('Publishing Records (Adaptive Batching)');
+  log.info(`Starting batch size: ${currentBatchSize} records | delay: ${currentBatchDelay}ms`);
+  log.info(`Will automatically adjust based on server feedback`);
   log.blank();
-  log.info(`Publishing ${totalRecords.toLocaleString()} records using adaptive batching...`);
-  log.warn('Press Ctrl+C to stop gracefully after current batch');
+  log.info(`Publishing ${totalRecords.toLocaleString()} records...`);
+  log.warn('Press Ctrl+C to stop gracefully (will stop after current batch)');
   log.blank();
 
   let successCount = 0;

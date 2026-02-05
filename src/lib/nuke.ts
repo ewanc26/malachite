@@ -4,17 +4,17 @@ import * as ui from '../utils/ui.js';
 import { log } from '../utils/logger.js';
 import { isImportCancelled } from '../utils/killswitch.js';
 import { prompt } from '../utils/input.js';
+import { MAX_DELETE_BATCH_SIZE } from '../constants.js';
 import { AdaptiveRateLimiter } from '../utils/adaptive-rate-limiter.js';
-
-/**
- * Maximum operations allowed per applyWrites call for deletions
- * Using a lower limit than imports (50 vs 200) to be extra conservative
- */
-const MAX_DELETE_OPS = 50;
 
 /**
  * Nuke all play records from the user's repository
  * This is a DESTRUCTIVE operation that deletes ALL records in the play collection
+ * 
+ * Based on pdsls deletion patterns:
+ * - Uses operations per applyWrites call (AT Protocol standard)
+ * - Simple batch processing with fixed delays
+ * - Delete operations cost 1 rate limit point each (vs 3 for creates)
  */
 export async function nukeAllRecords(
   agent: SafeAgent,
@@ -28,10 +28,10 @@ export async function nukeAllRecords(
     throw new Error('No authenticated session found');
   }
   
-  ui.header('⚠️  NUKE ALL RECORDS');
+  ui.header('NUKE ALL RECORDS');
   log.blank();
-  log.warn('THIS WILL DELETE ALL RECORDS IN YOUR PLAY COLLECTION');
-  log.warn('This action is IRREVERSIBLE and CANNOT be undone!');
+  log.error('⚠️  THIS WILL DELETE ALL RECORDS IN YOUR PLAY COLLECTION');
+  log.error('⚠️  This action is IRREVERSIBLE and CANNOT be undone!');
   log.blank();
   
   // First, count total records
@@ -73,7 +73,7 @@ export async function nukeAllRecords(
   }
   
   log.blank();
-  log.warn(`About to delete ${totalRecords.toLocaleString()} records from ${RECORD_TYPE}`);
+  log.warn(`Preparing to delete ${totalRecords.toLocaleString()} records`);
   log.blank();
   
   if (dryRun) {
@@ -96,72 +96,45 @@ export async function nukeAllRecords(
   
   log.blank();
   log.section('Deleting Records');
-  log.warn('Press Ctrl+C to cancel');
+  log.info('Press Ctrl+C to cancel (will stop after current batch)');
   log.blank();
   
-  // Initialize adaptive rate limiter for deletions
-  // VERY CONSERVATIVE settings for deletions to avoid rate limits
-  const rateLimiter = new AdaptiveRateLimiter(
-    config,
-    20,           // Start with only 20 records per batch (much more conservative)
-    2000,         // 2 second initial delay (10x more conservative than before)
-    MAX_DELETE_OPS // Cap at 50 instead of 200
-  );
-  
-  log.info(`Initial batch size: ${rateLimiter.getCurrentBatchSize()} records (very conservative)`);
-  log.info(`Initial delay: ${rateLimiter.getCurrentDelay()}ms (2 seconds between batches)`);
-  log.info(`Deletions are rate-limited more aggressively than imports`);
-  log.blank();
-  
-  // Delete records in batches
-  let progressBar = ui.createProgressBar(totalRecords, 'Deleting records');
+  // Delete records in batches with adaptive rate limiting
+  const progressBar = ui.createProgressBar(totalRecords, 'Deleting records');
   let deletedRecords = 0;
   const startTime = Date.now();
   
-  let batchNum = 0;
-  let retryCount = 0;
-  const MAX_RETRIES = 3;
+  log.info('Using extremely conservative rate limiting for deletions');
+  log.info('AT Protocol deletion rate limits are very strict');
+  log.info('Starting with 10 records/batch and 30s delays');
+  log.info('⏱️  This will be slow - expect ~1 hour per 1000 records');
+  log.blank();
   
-  // Process in batches using adaptive batch size
-  for (let i = 0; i < recordUris.length; ) {
+  // Use extremely conservative settings for deletions
+  // AT Protocol is VERY strict with deletion rate limits
+  const rateLimiter = new AdaptiveRateLimiter(
+    config,
+    10, // Very small batch size (10 records per batch)
+    30000, // Very long delay between batches (30 seconds)
+    MAX_DELETE_BATCH_SIZE // Max for deletions (10) - much lower than creates (200)
+  );
+  
+  let batchNum = 0;
+  let totalErrors = 0;
+  
+  // Process in batches
+  for (let i = 0; i < recordUris.length; i += rateLimiter.getCurrentBatchSize()) {
     // Check for cancellation
     if (isImportCancelled()) {
       progressBar.stop();
       log.blank();
       log.warn('Deletion cancelled by user');
-      log.info(`Deleted: ${deletedRecords.toLocaleString()}/${totalRecords.toLocaleString()} records`);
-      log.info(`Remaining: ${(totalRecords - deletedRecords).toLocaleString()} records`);
-      
-      // Show final stats
-      const finalStats = rateLimiter.getStats();
+      log.info(`Progress: ${deletedRecords.toLocaleString()}/${totalRecords.toLocaleString()} deleted`);
+      log.info(`Remaining: ${(totalRecords - deletedRecords).toLocaleString()} records not deleted`);
       log.blank();
-      log.info('📊 Rate Limiter Statistics:');
-      log.info(`   Total requests: ${finalStats.totalRequests}`);
-      log.info(`   Success rate: ${finalStats.successRate}%`);
-      log.info(`   Rate limits encountered: ${finalStats.rateLimits}`);
-      log.blank();
-      
+      const stats = rateLimiter.getStats();
+      showFinalStats(batchNum, totalErrors, stats.rateLimits, startTime);
       return { totalRecords, deletedRecords, cancelled: true };
-    }
-    
-    // Check circuit breaker
-    if (rateLimiter.isCircuitBreakerOpen()) {
-      progressBar.stop();
-      log.blank();
-      log.error('🔒 Circuit breaker is open - too many failures detected');
-      log.warn('⏸️  Entering recovery cooldown period...');
-      
-      // Wait for circuit breaker timeout
-      await rateLimiter.wait(() => isImportCancelled());
-      
-      if (isImportCancelled()) {
-        progressBar.stop();
-        return { totalRecords, deletedRecords, cancelled: true };
-      }
-      
-      log.info('🔓 Circuit breaker recovery period complete - resuming operations');
-      progressBar = ui.createProgressBar(totalRecords, 'Deleting records');
-      progressBar.update(deletedRecords);
     }
     
     batchNum++;
@@ -176,125 +149,109 @@ export async function nukeAllRecords(
     }));
     
     const batchStartTime = Date.now();
-    let batchSuccess = false;
     
-    while (retryCount <= MAX_RETRIES && !batchSuccess) {
-      try {
-        await agent.com.atproto.repo.applyWrites({
-          repo: did,
-          writes: writes as any,
-        });
-        
-        const responseTime = Date.now() - batchStartTime;
-        
-        deletedRecords += batch.length;
-        batchSuccess = true;
-        retryCount = 0;
-        
-        // Report success to rate limiter
-        await rateLimiter.onSuccess(responseTime);
-        
-        // Update progress
-        const elapsed = (Date.now() - startTime) / 1000;
-        const speed = deletedRecords / Math.max(elapsed, 0.1);
+    try {
+      await agent.com.atproto.repo.applyWrites({
+        repo: did,
+        writes: writes as any,
+      });
+      
+      const responseTime = Date.now() - batchStartTime;
+      deletedRecords += batch.length;
+      
+      // Report success to rate limiter
+      await rateLimiter.onSuccess(responseTime);
+      
+      // Update progress
+      const elapsed = (Date.now() - startTime) / 1000;
+      const speed = deletedRecords / Math.max(elapsed, 0.1);
+      progressBar.update(deletedRecords, { speed });
+      
+      // Show stats periodically (less often to reduce noise)
+      if (batchNum % 50 === 0) {
+        progressBar.stop();
+        log.blank();
+        const stats = rateLimiter.getStats();
+        const eta = (totalRecords - deletedRecords) / Math.max(speed, 0.1);
+        const etaMinutes = Math.ceil(eta / 60);
+        log.debug(
+          `Batch ${batchNum}: ${deletedRecords.toLocaleString()}/${totalRecords.toLocaleString()} ` +
+          `(${Math.round((deletedRecords / totalRecords) * 100)}%) ` +
+          `- ETA: ~${etaMinutes}m, batch: ${stats.batchSize}, delay: ${stats.delay}ms`
+        );
         progressBar.update(deletedRecords, { speed });
+      }
+      
+      // Wait before next batch
+      const delayTime = rateLimiter.getCurrentDelay();
+      if (delayTime > 0) {
+        await sleep(delayTime, () => isImportCancelled());
         
-        // Move to next batch
-        i += batch.length;
-        
-      } catch (error) {
-        const err = error as any;
-        
-        // Detect rate limiting
-        const detection = rateLimiter.detectRateLimit(err);
-        
-        if (detection.isRateLimited) {
+        if (isImportCancelled()) {
           progressBar.stop();
           log.blank();
-          log.warn(`⚠️  Rate limit detected (confidence: ${detection.confidence})`);
-          
-          // Report rate limit to limiter and get wait time
-          const waitTime = await rateLimiter.onRateLimit(err);
-          
-          retryCount++;
-          
-          if (retryCount <= MAX_RETRIES) {
-            log.info(`⏳ Waiting ${Math.ceil(waitTime / 1000)}s before retry ${retryCount}/${MAX_RETRIES}...`);
-            
-            // Wait with cancellation support
-            const completed = await rateLimiter.wait(() => isImportCancelled());
-            
-            if (!completed) {
-              return { totalRecords, deletedRecords, cancelled: true };
-            }
-            
-            log.info('⚡ Resuming deletion...');
-            progressBar = ui.createProgressBar(totalRecords, 'Deleting records');
-            progressBar.update(deletedRecords);
-            
-            continue; // Retry the batch
-          } else {
-            log.error(`❌ Max retries (${MAX_RETRIES}) exceeded for batch`);
-            log.warn(`Skipping ${batch.length} records`);
-            
-            // Move to next batch
-            i += batch.length;
-            break;
-          }
-          
-        } else {
-          // Non-rate-limit error
-          progressBar.stop();
-          log.blank();
-          log.error(`Batch deletion failed: ${err.message}`);
-          
-          // Report error to limiter
-          await rateLimiter.onError(err);
-          
-          retryCount++;
-          
-          if (retryCount <= MAX_RETRIES) {
-            const backoffDelay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-            log.warn(`Retrying batch after ${backoffDelay}ms (attempt ${retryCount}/${MAX_RETRIES})`);
-            
-            await new Promise(resolve => setTimeout(resolve, backoffDelay));
-            progressBar = ui.createProgressBar(totalRecords, 'Deleting records');
-            progressBar.update(deletedRecords);
-            continue;
-          } else {
-            log.error(`❌ Max retries exceeded, skipping ${batch.length} records`);
-            
-            // Move to next batch
-            i += batch.length;
-            break;
-          }
+          const stats = rateLimiter.getStats();
+          showFinalStats(batchNum, totalErrors, stats.rateLimits, startTime);
+          return { totalRecords, deletedRecords, cancelled: true };
         }
       }
-    }
-    
-    // Reset retry count for next batch
-    retryCount = 0;
-    
-    // Show rate limiter stats periodically
-    if (batchNum % 20 === 0) {
-      const stats = rateLimiter.getStats();
+      
+    } catch (error) {
+      const err = error as any;
+      totalErrors++;
+      
+      // Report error to rate limiter (it will handle backoff)
+      const rateLimit = rateLimiter.detectRateLimit(err);
+      
       progressBar.stop();
       log.blank();
-      log.debug(
-        `Stats: ${stats.successRate}% success, ${stats.rateLimits} rate limits, ` +
-        `${stats.avgResponseTime}ms avg, batch: ${stats.batchSize}, delay: ${stats.delay}ms`
-      );
-      progressBar = ui.createProgressBar(totalRecords, 'Deleting records');
-      progressBar.update(deletedRecords);
-    }
-    
-    // Wait before next batch (with cancellation support)
-    if (deletedRecords < totalRecords) {
-      const completed = await rateLimiter.wait(() => isImportCancelled());
       
-      if (!completed) {
-        progressBar.stop();
-        return { totalRecords, deletedRecords, cancelled: true };
+      if (rateLimit.isRateLimited) {
+        log.error(`⚠️  Rate limit detected (batch ${batchNum})`);
+        
+        // Let rate limiter handle the backoff
+        const backoff = await rateLimiter.onRateLimit(err);
+        const backoffMinutes = Math.ceil(backoff / 60000);
+        const backoffSeconds = Math.ceil((backoff % 60000) / 1000);
+        
+        if (backoff > 60000) {
+          log.error(`⏳ Rate limited: Waiting ${backoffMinutes}m ${backoffSeconds}s before retry`);
+          log.info('The AT Protocol has strict deletion limits');
+          log.info('Consider batching deletes across multiple days');
+        } else {
+          log.info(`⏳ Waiting ${Math.ceil(backoff / 1000)}s before retry...`);
+        }
+        
+        await sleep(backoff, () => isImportCancelled());
+        
+        if (isImportCancelled()) {
+          log.blank();
+          const stats = rateLimiter.getStats();
+          showFinalStats(batchNum, totalErrors, stats.rateLimits, startTime);
+          return { totalRecords, deletedRecords, cancelled: true };
+        }
+        
+        // Retry the same batch
+        log.info('⚡ Retrying batch...');
+        i -= currentBatchSize; // Go back to retry this batch
+        continue;
+        
+      } else {
+        // Non-rate-limit error
+        log.error(`❌ Batch ${batchNum} failed: ${err.message}`);
+        log.warn(`Skipping ${batch.length} records`);
+        
+        // Light backoff on other errors
+        await rateLimiter.onError(err);
+        const delayTime = rateLimiter.getCurrentDelay();
+        await sleep(delayTime, () => isImportCancelled());
+        
+        if (isImportCancelled()) {
+          log.blank();
+          const stats = rateLimiter.getStats();
+          showFinalStats(batchNum, totalErrors, stats.rateLimits, startTime);
+          return { totalRecords, deletedRecords, cancelled: true };
+        }
       }
     }
   }
@@ -303,28 +260,56 @@ export async function nukeAllRecords(
   log.blank();
   
   if (deletedRecords === totalRecords) {
-    log.success(`✓ Successfully deleted all ${deletedRecords.toLocaleString()} records`);
+    log.success(`Successfully deleted all ${deletedRecords.toLocaleString()} records`);
   } else {
-    log.warn(`Deleted ${deletedRecords.toLocaleString()} of ${totalRecords.toLocaleString()} records`);
-    log.warn(`${totalRecords - deletedRecords} records may have failed to delete`);
+    log.warn(`Partial deletion: ${deletedRecords.toLocaleString()} of ${totalRecords.toLocaleString()} deleted`);
+    log.warn(`${totalRecords - deletedRecords} records failed to delete`);
   }
   
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-  log.info(`Completed in ${elapsed}s`);
+  log.info(`Operation completed in ${elapsed}s`);
   
-  // Display final rate limiter stats
-  const finalStats = rateLimiter.getStats();
-  log.blank();
-  log.info('📊 Final Rate Limiter Statistics:');
-  log.info(`   Total requests: ${finalStats.totalRequests}`);
-  log.info(`   Success rate: ${finalStats.successRate}%`);
-  log.info(`   Rate limits encountered: ${finalStats.rateLimits}`);
-  log.info(`   Average response time: ${finalStats.avgResponseTime}ms`);
-  log.info(`   Final batch size: ${finalStats.batchSize}`);
-  log.info(`   Final delay: ${finalStats.delay}ms`);
-  log.blank();
+  const stats = rateLimiter.getStats();
+  showFinalStats(batchNum, totalErrors, stats.rateLimits, startTime);
   
   return { totalRecords, deletedRecords, cancelled: false };
+}
+
+/**
+ * Sleep with cancellation support
+ */
+async function sleep(ms: number, checkCancelled: () => boolean): Promise<void> {
+  const checkInterval = 100; // Check every 100ms
+  const checks = Math.ceil(ms / checkInterval);
+  
+  for (let i = 0; i < checks; i++) {
+    if (checkCancelled()) {
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, Math.min(checkInterval, ms - (i * checkInterval))));
+  }
+}
+
+/**
+ * Display final statistics
+ */
+function showFinalStats(
+  totalBatches: number,
+  totalErrors: number,
+  rateLimitHits: number,
+  startTime: number
+): void {
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  const successRate = totalBatches > 0 ? (((totalBatches - totalErrors) / totalBatches) * 100).toFixed(1) : '0.0';
+  
+  log.blank();
+  log.info('📊 Deletion Statistics:');
+  log.info(`   Total batches: ${totalBatches}`);
+  log.info(`   Success rate: ${successRate}%`);
+  log.info(`   Errors: ${totalErrors}`);
+  log.info(`   Rate limits: ${rateLimitHits}`);
+  log.info(`   Duration: ${elapsed}s`);
+  log.blank();
 }
 
 /**

@@ -6,7 +6,8 @@
 /**
  * Network and API constants
  */
-export const MAX_APPLY_WRITES_OPS = 200; // Maximum operations per applyWrites call
+export const MAX_APPLY_WRITES_OPS = 200; // Maximum operations per applyWrites call (for creates)
+export const MAX_DELETE_BATCH_SIZE = 10; // Maximum batch size for deletions (much stricter rate limit)
 export const TARGET_LATENCY_MS = 2000;   // Target request latency (2 seconds)
 export const MIN_BATCH_SIZE = 10;        // Minimum batch size for operations
 export const MAX_BATCH_SIZE = 100;       // Maximum batch size (AT Protocol limit)

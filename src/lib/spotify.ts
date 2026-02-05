@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { PlayRecord, Config } from '../types.js';
 import { formatDate } from '../utils/helpers.js';
 import { buildClientAgent } from '../config.js';
+import { log } from '../utils/logger.js';
 
 /**
  * Spotify streaming history record
@@ -33,7 +34,7 @@ export interface SpotifyRecord {
  * Supports both single files and directories with multiple JSON files
  */
 export function parseSpotifyJson(filePathOrDir: string): SpotifyRecord[] {
-  console.log(`Reading Spotify export: ${filePathOrDir}`);
+  log.progress(`Reading Spotify export: ${filePathOrDir}`);
   
   const stats = fs.statSync(filePathOrDir);
   let allRecords: SpotifyRecord[] = [];
@@ -44,13 +45,13 @@ export function parseSpotifyJson(filePathOrDir: string): SpotifyRecord[] {
       .filter(f => f.endsWith('.json') && f.startsWith('Streaming_History_Audio'))
       .map(f => path.join(filePathOrDir, f));
     
-    console.log(`Found ${files.length} Spotify JSON files in directory`);
+    log.info(`Found ${files.length} Spotify JSON files`);
     
     for (const file of files) {
       const fileContent = fs.readFileSync(file, 'utf-8');
       const records = JSON.parse(fileContent) as SpotifyRecord[];
       allRecords = allRecords.concat(records);
-      console.log(`  ${path.basename(file)}: ${records.length} records`);
+      log.debug(`${path.basename(file)}: ${records.length.toLocaleString()} records`);
     }
   } else {
     // Single file
@@ -64,7 +65,8 @@ export function parseSpotifyJson(filePathOrDir: string): SpotifyRecord[] {
     r.master_metadata_album_artist_name
   );
   
-  console.log(`✓ Parsed ${trackRecords.length} track records (filtered ${allRecords.length - trackRecords.length} non-music records)\n`);
+  const filtered = allRecords.length - trackRecords.length;
+  log.success(`Parsed ${trackRecords.length.toLocaleString()} track records (filtered ${filtered.toLocaleString()} non-music)`);
   return trackRecords;
 }
 
@@ -114,7 +116,7 @@ export function convertSpotifyToPlayRecord(spotifyRecord: SpotifyRecord, config:
  * Sort records chronologically
  */
 export function sortSpotifyRecords(records: PlayRecord[], reverseChronological = false): PlayRecord[] {
-  console.log(`Sorting records ${reverseChronological ? 'newest' : 'oldest'} first...`);
+  log.progress(`Sorting ${records.length.toLocaleString()} records (${reverseChronological ? 'newest' : 'oldest'} first)...`);
 
   records.sort((a, b) => {
     const timeA = new Date(a.playedTime).getTime();
@@ -124,9 +126,7 @@ export function sortSpotifyRecords(records: PlayRecord[], reverseChronological =
 
   const firstPlay = formatDate(records[0].playedTime);
   const lastPlay = formatDate(records[records.length - 1].playedTime);
-  console.log(`✓ Sorted ${records.length} records`);
-  console.log(`  First: ${firstPlay}`);
-  console.log(`  Last: ${lastPlay}\n`);
+  log.success(`Sorted ${records.length.toLocaleString()} records (${firstPlay} to ${lastPlay})`);
 
   return records;
 }
