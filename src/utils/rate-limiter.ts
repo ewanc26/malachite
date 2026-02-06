@@ -35,19 +35,25 @@ export interface RateLimitState {
   
   /** Safety margin to apply (0.0-1.0) */
   safetyMargin: number;
+  
+  /** Headroom threshold - pause when remaining drops below this % of limit */
+  headroomThreshold: number;
 }
 
 export class RateLimiter {
   private stateFile: string;
   private safetyMargin: number;
+  private headroomThreshold: number;
   
-  constructor(opts?: { safety?: number }) {
-    this.safetyMargin = opts?.safety ?? 0.75; // Default 75% safety margin
+  constructor(opts?: { safety?: number; headroom?: number }) {
+    this.safetyMargin = opts?.safety ?? 0.75; // Default 75% safety margin (deprecated, use headroom instead)
+    this.headroomThreshold = opts?.headroom ?? 0.15; // Default 15% headroom - pause when we hit this threshold
     const stateDir = path.join(getMalachiteStateDir(), 'state');
     this.stateFile = path.join(stateDir, 'rate-limit.json');
     
     log.info(`[RateLimiter] 💾 State file path: ${this.stateFile}`);
-    log.debug(`[RateLimiter] constructor: stateFile=${this.stateFile}, safety=${this.safetyMargin}`);
+    log.info(`[RateLimiter] 🛡️ Headroom threshold: ${(this.headroomThreshold * 100).toFixed(0)}% - will pause when remaining drops below this`);
+    log.debug(`[RateLimiter] constructor: stateFile=${this.stateFile}, safety=${this.safetyMargin}, headroom=${this.headroomThreshold}`);
     this.ensureStateDir();
   }
   
@@ -124,19 +130,27 @@ export class RateLimiter {
     let resetAt = parsed.reset || (now + (parsed.windowSeconds || 3600));
     let windowSeconds = parsed.windowSeconds || 3600;
     
-    // Apply safety margin to remaining
-    const remainingWithSafety = Math.floor(parsed.remaining * this.safetyMargin);
-    
+    // Store the actual remaining from server (no modification)
+    // We'll check headroom separately when making decisions
     const state: RateLimitState = {
       limit: parsed.limit,
-      remaining: remainingWithSafety,
+      remaining: parsed.remaining, // Store actual server value
       resetAt,
       windowSeconds,
       updatedAt: now,
-      safetyMargin: this.safetyMargin
+      safetyMargin: this.safetyMargin,
+      headroomThreshold: this.headroomThreshold
     };
     
-    log.info(`[RateLimiter] Updated from headers: ${parsed.limit} limit, ${remainingWithSafety}/${parsed.remaining} remaining (${(this.safetyMargin * 100).toFixed(0)}% safety), resets at ${new Date(resetAt * 1000).toISOString()}`);
+    const headroomPoints = Math.floor(parsed.limit * this.headroomThreshold);
+    const percentRemaining = ((parsed.remaining / parsed.limit) * 100).toFixed(1);
+    
+    log.info(`[RateLimiter] Updated from headers: ${parsed.limit} limit, ${parsed.remaining} remaining (${percentRemaining}%), headroom threshold: ${headroomPoints} points (${(this.headroomThreshold * 100).toFixed(0)}%), resets at ${new Date(resetAt * 1000).toISOString()}`);
+    
+    // Warn if we're getting close to headroom threshold
+    if (parsed.remaining <= headroomPoints) {
+      log.warn(`[RateLimiter] ⚠️  Approaching headroom threshold! ${parsed.remaining} <= ${headroomPoints} (${(this.headroomThreshold * 100).toFixed(0)}% of limit)`);
+    }
     
     this.writeState(state);
   }
@@ -157,16 +171,27 @@ export class RateLimiter {
     // Check if window has reset
     if (now >= state.resetAt) {
       log.info(`[RateLimiter] Window has reset! Restoring quota to ${state.limit}`);
-      state.remaining = Math.floor(state.limit * this.safetyMargin);
+      state.remaining = state.limit; // Restore to full limit
       state.resetAt = now + state.windowSeconds;
       state.updatedAt = now;
       this.writeState(state);
       return true;
     }
     
-    // Check if we have enough quota
-    const hasQuota = state.remaining >= pointsNeeded;
-    log.debug(`[RateLimiter] checkQuota(${pointsNeeded}): remaining=${state.remaining}, hasQuota=${hasQuota}`);
+    // Calculate headroom threshold - we want to pause BEFORE hitting zero
+    const headroomPoints = Math.floor(state.limit * this.headroomThreshold);
+    const effectiveRemaining = state.remaining - headroomPoints;
+    
+    // Check if we have enough quota (with headroom considered)
+    const hasQuota = effectiveRemaining >= pointsNeeded;
+    
+    if (!hasQuota && state.remaining > 0) {
+      const percentRemaining = ((state.remaining / state.limit) * 100).toFixed(1);
+      log.debug(`[RateLimiter] checkQuota(${pointsNeeded}): remaining=${state.remaining} (${percentRemaining}%), headroom=${headroomPoints}, effective=${effectiveRemaining}, hasQuota=${hasQuota}`);
+      log.info(`[RateLimiter] Approaching headroom threshold - preserving ${headroomPoints} points (${(this.headroomThreshold * 100).toFixed(0)}% buffer)`);
+    } else {
+      log.debug(`[RateLimiter] checkQuota(${pointsNeeded}): remaining=${state.remaining}, hasQuota=${hasQuota}`);
+    }
     
     return hasQuota;
   }
@@ -187,16 +212,27 @@ export class RateLimiter {
     // Check if window has reset
     if (now >= state.resetAt) {
       log.info(`[RateLimiter] Window reset! Restoring quota`);
-      state.remaining = Math.floor(state.limit * this.safetyMargin);
+      state.remaining = state.limit; // Restore to full limit
       state.resetAt = now + state.windowSeconds;
       state.updatedAt = now;
       this.writeState(state);
     }
     
-    // Check quota
-    if (state.remaining < pointsNeeded) {
+    // Calculate headroom - preserve a buffer before hitting zero
+    const headroomPoints = Math.floor(state.limit * this.headroomThreshold);
+    const effectiveRemaining = state.remaining - headroomPoints;
+    
+    // Check quota with headroom
+    if (effectiveRemaining < pointsNeeded) {
       const waitTime = state.resetAt - now;
-      log.warn(`[RateLimiter] ❌ Quota exhausted! Need ${pointsNeeded} points, only ${state.remaining} remaining`);
+      const percentRemaining = ((state.remaining / state.limit) * 100).toFixed(1);
+      
+      if (state.remaining > 0) {
+        log.warn(`[RateLimiter] ❌ Approaching rate limit headroom! Need ${pointsNeeded} points, have ${state.remaining} (${percentRemaining}%) but preserving ${headroomPoints} point buffer`);
+      } else {
+        log.warn(`[RateLimiter] ❌ Quota exhausted! Need ${pointsNeeded} points, ${state.remaining} remaining`);
+      }
+      
       log.warn(`[RateLimiter] Must wait ${waitTime}s (${Math.floor(waitTime / 60)}m ${waitTime % 60}s) until ${new Date(state.resetAt * 1000).toISOString()}`);
       return false;
     }
@@ -268,6 +304,8 @@ export class RateLimiter {
     limit?: number;
     remaining?: number;
     remainingPercent?: number;
+    headroomPoints?: number;
+    effectiveRemaining?: number;
     resetAt?: Date;
     secondsUntilReset?: number;
     windowSeconds?: number;
@@ -280,12 +318,16 @@ export class RateLimiter {
     const now = Math.floor(Date.now() / 1000);
     const secondsUntilReset = Math.max(0, state.resetAt - now);
     const remainingPercent = (state.remaining / state.limit) * 100;
+    const headroomPoints = Math.floor(state.limit * this.headroomThreshold);
+    const effectiveRemaining = state.remaining - headroomPoints;
     
     return {
       hasState: true,
       limit: state.limit,
       remaining: state.remaining,
       remainingPercent,
+      headroomPoints,
+      effectiveRemaining,
       resetAt: new Date(state.resetAt * 1000),
       secondsUntilReset,
       windowSeconds: state.windowSeconds
