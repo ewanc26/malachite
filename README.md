@@ -10,10 +10,20 @@ Import your Last.fm and Spotify listening history to the AT Protocol network usi
 **CRITICAL**: Bluesky's AppView has rate limits on PDS instances. Exceeding 10K records per day can rate limit your **ENTIRE PDS**, affecting all users on your instance.
 
 This importer automatically protects your PDS by:
-- Limiting imports to **1,000 records per day** (with 75% safety margin)
+- Limiting imports to **7,500 records per day** (with 75% safety margin)
 - Calculating optimal batch sizes and delays
 - Pausing 24 hours between days for large imports
 - Providing clear progress tracking and time estimates
+- Persisting state across restarts for safe resume
+
+### 📚 Rate Limiting Documentation
+
+Malachite has comprehensive rate limiting protection built in.
+
+**New**: Monitor your rate limit status anytime:
+```bash
+npm run check-limits
+```
 
 For more details, see the [Bluesky Rate Limits Documentation](https://docs.bsky.app/blog/rate-limits-pds-v3).
 

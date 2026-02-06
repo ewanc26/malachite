@@ -1,12 +1,6 @@
 import type { AtpAgent } from '@atproto/api';
 import { formatDuration, formatDate } from '../utils/helpers.js';
 import { isImportCancelled } from '../utils/killswitch.js';
-import {
-  calculateDailySchedule,
-  displayRateLimitWarning,
-  displayRateLimitInfo,
-  calculateRateLimitedBatches,
-} from '../utils/rate-limiter.js';
 import { RateLimiter } from '../utils/rate-limiter.js';
 import { isRateLimitError } from '../utils/rate-limit-headers.js';
 import { formatLocaleNumber } from '../utils/platform.js';
@@ -275,46 +269,23 @@ function handleDryRun(
 ): PublishResult {
   const totalRecords = records.length;
 
-  // Calculate rate limiting info
-  const rateLimitParams = calculateRateLimitedBatches(totalRecords, config);
+  // Ensure batch size doesn't exceed applyWrites limit
+  batchSize = Math.min(batchSize, MAX_APPLY_WRITES_OPS);
 
-  if (rateLimitParams.needsRateLimiting) {
-    displayRateLimitWarning();
-    batchSize = rateLimitParams.batchSize;
-    batchDelay = rateLimitParams.batchDelay;
-
-    // Ensure batch size doesn't exceed applyWrites limit
-    batchSize = Math.min(batchSize, MAX_APPLY_WRITES_OPS);
-
-    displayRateLimitInfo(
-      totalRecords,
-      batchSize,
-      batchDelay,
-      rateLimitParams.estimatedDays,
-      rateLimitParams.recordsPerDay
-    );
-
-    if (rateLimitParams.estimatedDays > 1) {
-      // Only show daily schedule in verbose/debug mode
-      if (log.getLevel() <= 0) { // DEBUG level
-        const dailySchedule = calculateDailySchedule(
-          totalRecords,
-          batchSize,
-          batchDelay,
-          rateLimitParams.recordsPerDay
-        );
-
-        console.log('📅 Multi-Day Import Schedule:\n');
-        dailySchedule.forEach((day) => {
-          console.log(`   Day ${day.day}:`);
-          console.log(`     Records ${day.recordsStart + 1}-${day.recordsEnd} (${day.recordsCount} total)`);
-          if (day.pauseAfter) {
-            console.log(`     → Pause 24h after completion`);
-          }
-        });
-        console.log('');
-      }
-    }
+  // Calculate estimated duration
+  const estimatedBatches = Math.ceil(totalRecords / batchSize);
+  const estimatedDuration = estimatedBatches * batchDelay;
+  
+  // Check if we'll exceed daily limit
+  const recordsPerDay = config.RECORDS_PER_DAY_LIMIT || Number.MAX_SAFE_INTEGER;
+  const needsRateLimiting = totalRecords > recordsPerDay;
+  
+  if (needsRateLimiting) {
+    const estimatedDays = Math.ceil(totalRecords / recordsPerDay);
+    log.warn('⚠️  Large Import Detected');
+    log.warn(`This import exceeds the daily limit of ${formatLocaleNumber(recordsPerDay)} records`);
+    log.warn(`Estimated duration: ${estimatedDays} days with automatic pauses`);
+    log.blank();
   }
 
   log.section(`DRY RUN MODE ${syncMode ? '(SYNC)' : ''}`);
@@ -324,10 +295,11 @@ function handleDryRun(
   log.info(`Total: ${formatLocaleNumber(totalRecords)} records`);
   log.info(`Batch: ${Math.min(batchSize, MAX_APPLY_WRITES_OPS)} records per call`);
   
-  if (rateLimitParams.estimatedDays > 1) {
-    log.info(`Duration: ${rateLimitParams.estimatedDays} days with automatic pauses`);
+  if (needsRateLimiting) {
+    const estimatedDays = Math.ceil(totalRecords / recordsPerDay);
+    log.info(`Duration: ${estimatedDays} days with automatic pauses`);
   } else {
-    log.info(`Time: ~${formatDuration(Math.ceil(totalRecords / batchSize) * batchDelay)}`);
+    log.info(`Time: ~${formatDuration(estimatedDuration)}`);
   }
   log.blank();
 

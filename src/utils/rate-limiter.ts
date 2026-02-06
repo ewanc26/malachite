@@ -1,279 +1,261 @@
-import type { Config } from '../types.js';
-import { formatLocaleNumber } from './platform.js';
-import { log } from './logger.js';
-
 /**
- * Calculate rate-limited batch parameters
- * Ensures we don't exceed daily limits while maintaining efficiency
+ * IMPROVED Rate Limiter - Based on actual server behavior
+ * 
+ * KEY LEARNINGS:
+ * - Rate limits are typically PER HOUR (3600s), not per day
+ * - Example from selfhosted.social:
+ *   - ratelimit-limit: 5000 points
+ *   - ratelimit-policy: 5000;w=3600 (5000 points per 3600 seconds = 1 hour)
+ * - Each applyWrites operation costs ~3 points per record
+ * - MUST respect ratelimit-remaining: 0 as a hard stop
+ * - MUST wait until ratelimit-reset timestamp before continuing
  */
-export function calculateRateLimitedBatches(
-  totalRecords: number,
-  config: Config
-): {
-  batchSize: number;
-  batchDelay: number;
-  estimatedDays: number;
-  recordsPerDay: number;
-  needsRateLimiting: boolean;
-} {
-  log.debug(`[rate-limiter.ts] calculateRateLimitedBatches(totalRecords=${totalRecords})`);
-  
-  const dailyLimit = Math.floor(config.RECORDS_PER_DAY_LIMIT * config.SAFETY_MARGIN);
-  log.debug(`[rate-limiter.ts] Daily limit: ${formatLocaleNumber(dailyLimit)} (raw limit=${config.RECORDS_PER_DAY_LIMIT}, safety margin=${config.SAFETY_MARGIN})`);
-  
-  // Check if we need rate limiting
-  const needsRateLimiting = totalRecords > dailyLimit;
-  log.info(`[rate-limiter.ts] Rate limiting needed: ${needsRateLimiting} (${formatLocaleNumber(totalRecords)} records > ${formatLocaleNumber(dailyLimit)} daily limit)`);
-  
-  if (!needsRateLimiting) {
-    // Can import everything in one go
-    log.debug(`[rate-limiter.ts] No rate limiting needed - can import all ${formatLocaleNumber(totalRecords)} records in one batch`);
-    return {
-      batchSize: config.DEFAULT_BATCH_SIZE,
-      batchDelay: config.DEFAULT_BATCH_DELAY,
-      estimatedDays: 1,
-      recordsPerDay: totalRecords,
-      needsRateLimiting: false,
-    };
-  }
-  
-  // Calculate how many days needed
-  const estimatedDays = Math.ceil(totalRecords / dailyLimit);
-  const recordsPerDay = Math.floor(totalRecords / estimatedDays);
-  log.info(`[rate-limiter.ts] Estimated duration: ${estimatedDays} day(s), spreading ${formatLocaleNumber(recordsPerDay)} records/day`);
-  
-  // Calculate batch parameters
-  // We want to spread records evenly throughout the day
-  const minutesPerDay = 24 * 60;
-  const batchesPerDay = Math.ceil(recordsPerDay / config.DEFAULT_BATCH_SIZE);
-  const delayBetweenBatches = Math.floor((minutesPerDay * 60 * 1000) / batchesPerDay);
-  log.debug(`[rate-limiter.ts] Batches per day: ${batchesPerDay}, delay between batches: ${delayBetweenBatches}ms`);
-  
-  // Ensure batch delay is at least minimum
-  const batchDelay = Math.max(delayBetweenBatches, config.MIN_BATCH_DELAY);
-  if (batchDelay !== delayBetweenBatches) {
-    log.debug(`[rate-limiter.ts] Batch delay adjusted from ${delayBetweenBatches}ms to minimum ${config.MIN_BATCH_DELAY}ms`);
-  }
-  
-  // Adjust batch size if needed to hit the target
-  const adjustedBatchSize = Math.min(
-    Math.ceil(recordsPerDay / Math.floor((minutesPerDay * 60 * 1000) / batchDelay)),
-    config.MAX_BATCH_SIZE
-  );
-  log.debug(`[rate-limiter.ts] Final batch parameters: size=${adjustedBatchSize}, delay=${batchDelay}ms (default was size=${config.DEFAULT_BATCH_SIZE}, delay=${config.DEFAULT_BATCH_DELAY}ms)`);
-  
-  return {
-    batchSize: adjustedBatchSize,
-    batchDelay,
-    estimatedDays,
-    recordsPerDay,
-    needsRateLimiting: true,
-  };
-}
 
-// --------------------------------------------------
-// RateLimiter class (persisted state + header handling)
-// --------------------------------------------------
 import fs from 'node:fs';
 import path from 'node:path';
 import { getMalachiteStateDir } from './platform.js';
 import { parseRateLimitHeaders } from './rate-limit-headers.js';
+import { log } from './logger.js';
+
+export interface RateLimitState {
+  /** Maximum points allowed in the time window */
+  limit: number;
+  
+  /** Points remaining in current window */
+  remaining: number;
+  
+  /** Unix timestamp (seconds) when the window resets */
+  resetAt: number;
+  
+  /** Window duration in seconds (typically 3600 = 1 hour) */
+  windowSeconds: number;
+  
+  /** When this state was last updated (unix timestamp in seconds) */
+  updatedAt: number;
+  
+  /** Safety margin to apply (0.0-1.0) */
+  safetyMargin: number;
+}
 
 export class RateLimiter {
-  stateFile: string;
-  safety: number;
-
+  private stateFile: string;
+  private safetyMargin: number;
+  
   constructor(opts?: { safety?: number }) {
-    this.safety = opts?.safety ?? 1.0;
+    this.safetyMargin = opts?.safety ?? 0.75; // Default 75% safety margin
     const stateDir = path.join(getMalachiteStateDir(), 'state');
     this.stateFile = path.join(stateDir, 'rate-limit.json');
-    log.debug(`[RateLimiter] constructor: stateFile=${this.stateFile}, safety=${this.safety}`);
+    
+    log.debug(`[RateLimiter] constructor: stateFile=${this.stateFile}, safety=${this.safetyMargin}`);
     this.ensureStateDir();
   }
-
-  ensureStateDir() {
+  
+  private ensureStateDir(): void {
     const dir = path.dirname(this.stateFile);
     if (!fs.existsSync(dir)) {
-      log.debug(`[RateLimiter] ensureStateDir() creating: ${dir}`);
+      log.debug(`[RateLimiter] Creating state directory: ${dir}`);
       fs.mkdirSync(dir, { recursive: true });
-    } else {
-      log.debug(`[RateLimiter] ensureStateDir() directory already exists: ${dir}`);
     }
   }
-
-  persistState(obj: Record<string, any>) {
-    log.debug(`[RateLimiter] persistState() writing to ${this.stateFile}: ${JSON.stringify(obj)}`);
-    fs.writeFileSync(this.stateFile, JSON.stringify(obj, null, 2), 'utf8');
-  }
-
-  readState(): Record<string, any> {
+  
+  private readState(): RateLimitState | null {
     try {
       const raw = fs.readFileSync(this.stateFile, 'utf8');
-      const state = JSON.parse(raw);
-      log.debug(`[RateLimiter] readState() loaded from ${this.stateFile}: ${JSON.stringify(state)}`);
+      const state = JSON.parse(raw) as RateLimitState;
+      log.debug(`[RateLimiter] Loaded state: ${JSON.stringify(state)}`);
       return state;
     } catch (e) {
-      log.debug(`[RateLimiter] readState() no state file found (${this.stateFile}), returning empty object`);
-      return {};
+      log.debug(`[RateLimiter] No existing state file`);
+      return null;
     }
   }
-
+  
+  private writeState(state: RateLimitState): void {
+    log.debug(`[RateLimiter] Writing state: ${JSON.stringify(state)}`);
+    fs.writeFileSync(this.stateFile, JSON.stringify(state, null, 2), 'utf8');
+  }
+  
   /**
-   * Update internal state based on server rate-limit headers
+   * Update rate limit state from server response headers
    */
-  updateFromHeaders(headers: Record<string, string>) {
+  updateFromHeaders(headers: Record<string, string>): void {
     log.debug(`[RateLimiter] updateFromHeaders() called`);
     const parsed = parseRateLimitHeaders(headers);
-    const limit = parsed.limit || 0;
-    const remainingRaw = parsed.remaining || 0;
-    const windowSeconds = parsed.windowSeconds || 0;
-
-    const remaining = Math.floor(remainingRaw * this.safety);
-    log.info(`[RateLimiter] Rate limit info: limit=${limit}, remaining_raw=${remainingRaw}, remaining_with_safety=${remaining}, window=${windowSeconds}s`);
-
-    const obj = {
-      limit,
-      remaining,
-      windowSeconds,
-      updatedAt: Math.floor(Date.now() / 1000),
-    };
-
-    this.persistState(obj);
-    return obj;
-  }
-
-  /**
-   * Decrement remaining permits and persist. If not enough remaining, returns false.
-   */
-  async waitForPermit(count = 1): Promise<boolean> {
-    const state = this.readState();
-    const rem = typeof state.remaining === 'number' ? state.remaining : 0;
-    log.debug(`[RateLimiter] waitForPermit(${count}) called, current remaining: ${rem}/${state.limit}`);
     
-    if (rem >= count) {
-      state.remaining = Math.max(0, rem - count);
-      log.debug(`[RateLimiter] waitForPermit() quota available, decrementing ${rem} -> ${state.remaining}`);
-      this.persistState(state);
+    if (!parsed.limit || parsed.remaining === undefined) {
+      log.warn('[RateLimiter] Headers missing limit or remaining - cannot update');
+      return;
+    }
+    
+    const now = Math.floor(Date.now() / 1000);
+    let resetAt = parsed.reset || (now + (parsed.windowSeconds || 3600));
+    let windowSeconds = parsed.windowSeconds || 3600;
+    
+    // Apply safety margin to remaining
+    const remainingWithSafety = Math.floor(parsed.remaining * this.safetyMargin);
+    
+    const state: RateLimitState = {
+      limit: parsed.limit,
+      remaining: remainingWithSafety,
+      resetAt,
+      windowSeconds,
+      updatedAt: now,
+      safetyMargin: this.safetyMargin
+    };
+    
+    log.info(`[RateLimiter] Updated from headers: ${parsed.limit} limit, ${remainingWithSafety}/${parsed.remaining} remaining (${(this.safetyMargin * 100).toFixed(0)}% safety), resets at ${new Date(resetAt * 1000).toISOString()}`);
+    
+    this.writeState(state);
+  }
+  
+  /**
+   * Check if we have enough quota for the requested points
+   * Returns true if quota is available, false otherwise
+   */
+  async checkQuota(pointsNeeded: number): Promise<boolean> {
+    const state = this.readState();
+    if (!state) {
+      log.warn('[RateLimiter] No state - assuming quota available');
+      return true; // No state yet, let first request go through
+    }
+    
+    const now = Math.floor(Date.now() / 1000);
+    
+    // Check if window has reset
+    if (now >= state.resetAt) {
+      log.info(`[RateLimiter] Window has reset! Restoring quota to ${state.limit}`);
+      state.remaining = Math.floor(state.limit * this.safetyMargin);
+      state.resetAt = now + state.windowSeconds;
+      state.updatedAt = now;
+      this.writeState(state);
       return true;
     }
-
-    // Not enough quota; if windowSeconds is set, sleep until reset
-    if (state.windowSeconds && state.windowSeconds > 0) {
-      const waitMs = state.windowSeconds * 1000 + 1000;
-      const waitSeconds = Math.floor(waitMs / 1000);
-      log.warn(`[RateLimiter] Quota exhausted! Remaining ${rem}/${state.limit}. Waiting ${waitSeconds}s for quota reset (window=${state.windowSeconds}s)`);
-      await new Promise((res) => setTimeout(res, waitMs));
-      // After waiting, set remaining to limit * safety
-      state.remaining = Math.floor((state.limit || 0) * this.safety) - count;
-      if (state.remaining < 0) state.remaining = 0;
-      log.debug(`[RateLimiter] waitForPermit() quota reset complete, remaining now: ${state.remaining}`);
-      this.persistState(state);
+    
+    // Check if we have enough quota
+    const hasQuota = state.remaining >= pointsNeeded;
+    log.debug(`[RateLimiter] checkQuota(${pointsNeeded}): remaining=${state.remaining}, hasQuota=${hasQuota}`);
+    
+    return hasQuota;
+  }
+  
+  /**
+   * Reserve quota points before making a request
+   * Returns true if reservation succeeded, false if quota exhausted
+   */
+  async reserveQuota(pointsNeeded: number): Promise<boolean> {
+    const state = this.readState();
+    if (!state) {
+      log.warn('[RateLimiter] No state yet - allowing request (will be initialized from response)');
       return true;
     }
-
-    log.warn(`[RateLimiter] waitForPermit() failed: quota exhausted and no reset window info available`);
-    return false;
+    
+    const now = Math.floor(Date.now() / 1000);
+    
+    // Check if window has reset
+    if (now >= state.resetAt) {
+      log.info(`[RateLimiter] Window reset! Restoring quota`);
+      state.remaining = Math.floor(state.limit * this.safetyMargin);
+      state.resetAt = now + state.windowSeconds;
+      state.updatedAt = now;
+      this.writeState(state);
+    }
+    
+    // Check quota
+    if (state.remaining < pointsNeeded) {
+      const waitTime = state.resetAt - now;
+      log.warn(`[RateLimiter] ❌ Quota exhausted! Need ${pointsNeeded} points, only ${state.remaining} remaining`);
+      log.warn(`[RateLimiter] Must wait ${waitTime}s (${Math.floor(waitTime / 60)}m ${waitTime % 60}s) until ${new Date(state.resetAt * 1000).toISOString()}`);
+      return false;
+    }
+    
+    // Reserve the quota
+    state.remaining -= pointsNeeded;
+    state.updatedAt = now;
+    this.writeState(state);
+    
+    log.debug(`[RateLimiter] ✅ Reserved ${pointsNeeded} points, ${state.remaining} remaining`);
+    return true;
   }
-}
-
-/**
- * Calculate daily batches and pause times
- */
-export function calculateDailySchedule(
-  totalRecords: number,
-  batchSize: number,
-  batchDelay: number,
-  recordsPerDay: number
-) {
-  const schedule = [];
-
-  // How many batches fit into a 24h window using the actual delay?
-  const batchesPerDay = Math.floor((24 * 60 * 60 * 1000) / batchDelay);
-
-  // Max records we could process in one day given the spacing
-  const maxRecordsPerDay = batchesPerDay * batchSize;
-
-  // Respect the external rate limit (recordsPerDay)
-  const dailyCap = Math.min(maxRecordsPerDay, recordsPerDay);
-
-  let processed = 0;
-  let day = 1;
-
-  while (processed < totalRecords) {
-    const recordsStart = processed;
-    const dailyCount = Math.min(dailyCap, totalRecords - processed);
-    const recordsEnd = recordsStart + dailyCount;
-    const isLastDay = recordsEnd >= totalRecords;
-
-    schedule.push({
-      day,
-      recordsStart,
-      recordsEnd,
-      recordsCount: dailyCount,
-      pauseAfter: !isLastDay,
-      pauseDuration: isLastDay ? 0 : 24 * 60 * 60 * 1000
-    });
-
-    processed = recordsEnd;
-    day++;
-  }
-
-  return schedule;
-}
-
-
-/**
- * Format time duration in human-readable format
- */
-export function formatTimeRemaining(ms: number): string {
-  const days = Math.floor(ms / (24 * 60 * 60 * 1000));
-  const hours = Math.floor((ms % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-  const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
   
-  if (days > 0) {
-    return `${days}d ${hours}h ${minutes}m`;
-  } else if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  } else if (minutes > 0) {
-    return `${minutes}m`;
-  } else {
-    return '< 1m';
+  /**
+   * Wait until the rate limit window resets
+   */
+  async waitForReset(): Promise<void> {
+    const state = this.readState();
+    if (!state) {
+      log.warn('[RateLimiter] No state - nothing to wait for');
+      return;
+    }
+    
+    const now = Math.floor(Date.now() / 1000);
+    const waitTime = Math.max(0, state.resetAt - now);
+    
+    if (waitTime === 0) {
+      log.info('[ImprovedRateLimiter] Window already reset');
+      return;
+    }
+    
+    const minutes = Math.floor(waitTime / 60);
+    const seconds = waitTime % 60;
+    
+    log.warn(`[RateLimiter] ⏳ Waiting ${minutes}m ${seconds}s for quota reset...`);
+    log.warn(`[RateLimiter] Reset at: ${new Date(state.resetAt * 1000).toISOString()}`);
+    
+    // Wait with 1 second added as buffer
+    await new Promise(resolve => setTimeout(resolve, (waitTime + 1) * 1000));
+    
+    log.info('[RateLimiter] ✅ Wait complete - quota should be reset');
   }
-}
-
-/**
- * Display rate limit warning
- */
-export function displayRateLimitWarning(): void {
-  console.log('');
-  console.log('⚠️  IMPORTANT: Rate Limits');
-  console.log('   Exceeding 10K records/day can rate limit your ENTIRE PDS.');
-  console.log('   This affects ALL users on your PDS, not just your account.');
-  console.log('   Import automatically limits to 10K records/day with pauses.');
-  console.log('   See: https://docs.bsky.app/blog/rate-limits-pds-v3');
-  console.log('');
-}
-
-/**
- * Display rate limiting info
- */
-export function displayRateLimitInfo(
-  totalRecords: number,
-  batchSize: number,
-  batchDelay: number,
-  estimatedDays: number,
-  recordsPerDay: number
-): void {
-  console.log('\n📊 Rate Limiting Information:');
-  console.log(`   Total records: ${formatLocaleNumber(totalRecords)}`);
-  console.log(`   Daily limit: ${formatLocaleNumber(recordsPerDay)} records/day`);
-  console.log(`   Estimated duration: ${estimatedDays} day${estimatedDays > 1 ? 's' : ''}`);
-  console.log(`   Batch size: ${batchSize} records`);
-  console.log(`   Batch delay: ${(batchDelay / 1000).toFixed(1)}s`);
   
-  if (estimatedDays > 1) {
-    console.log('\n   The import will automatically pause between days.');
-    console.log('   You can safely close and restart the importer - it will resume from where it left off.');
+  /**
+   * Wait for a permit with the given number of points.
+   * This combines reserveQuota and waitForReset logic:
+   * - If quota is available, reserves it immediately
+   * - If quota is exhausted, waits until reset and then reserves
+   */
+  async waitForPermit(pointsNeeded: number): Promise<boolean> {
+    // Try to reserve quota first
+    const reserved = await this.reserveQuota(pointsNeeded);
+    if (reserved) {
+      return true; // Got the permit immediately
+    }
+    
+    // Quota exhausted - wait for reset
+    await this.waitForReset();
+    
+    // Try again after reset
+    return await this.reserveQuota(pointsNeeded);
   }
-  console.log('');
+  
+  /**
+   * Get current rate limit status for monitoring
+   */
+  getStatus(): {
+    hasState: boolean;
+    limit?: number;
+    remaining?: number;
+    remainingPercent?: number;
+    resetAt?: Date;
+    secondsUntilReset?: number;
+    windowSeconds?: number;
+  } {
+    const state = this.readState();
+    if (!state) {
+      return { hasState: false };
+    }
+    
+    const now = Math.floor(Date.now() / 1000);
+    const secondsUntilReset = Math.max(0, state.resetAt - now);
+    const remainingPercent = (state.remaining / state.limit) * 100;
+    
+    return {
+      hasState: true,
+      limit: state.limit,
+      remaining: state.remaining,
+      remainingPercent,
+      resetAt: new Date(state.resetAt * 1000),
+      secondsUntilReset,
+      windowSeconds: state.windowSeconds
+    };
+  }
 }
