@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getMalachiteStateDir } from './platform.js';
-import { parseRateLimitHeaders } from './rate-limit-headers.js';
+import { parseRateLimitHeaders, normalizeHeaders } from './rate-limit-headers.js';
 import { log } from './logger.js';
 
 export interface RateLimitState {
@@ -46,15 +46,24 @@ export class RateLimiter {
     const stateDir = path.join(getMalachiteStateDir(), 'state');
     this.stateFile = path.join(stateDir, 'rate-limit.json');
     
+    log.info(`[RateLimiter] 💾 State file path: ${this.stateFile}`);
     log.debug(`[RateLimiter] constructor: stateFile=${this.stateFile}, safety=${this.safetyMargin}`);
     this.ensureStateDir();
   }
   
   private ensureStateDir(): void {
     const dir = path.dirname(this.stateFile);
-    if (!fs.existsSync(dir)) {
-      log.debug(`[RateLimiter] Creating state directory: ${dir}`);
-      fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (!fs.existsSync(dir)) {
+        log.info(`[RateLimiter] Creating state directory: ${dir}`);
+        fs.mkdirSync(dir, { recursive: true });
+        log.info(`[RateLimiter] ✅ State directory created`);
+      } else {
+        log.debug(`[RateLimiter] State directory already exists: ${dir}`);
+      }
+    } catch (error) {
+      log.error(`[RateLimiter] ❌ Failed to create state directory: ${error}`);
+      throw error;
     }
   }
   
@@ -71,8 +80,30 @@ export class RateLimiter {
   }
   
   private writeState(state: RateLimitState): void {
-    log.debug(`[RateLimiter] Writing state: ${JSON.stringify(state)}`);
-    fs.writeFileSync(this.stateFile, JSON.stringify(state, null, 2), 'utf8');
+    try {
+      log.debug(`[RateLimiter] Writing state to: ${this.stateFile}`);
+      log.debug(`[RateLimiter] State data: ${JSON.stringify(state)}`);
+      
+      // Ensure directory exists before writing
+      this.ensureStateDir();
+      
+      const stateJson = JSON.stringify(state, null, 2);
+      fs.writeFileSync(this.stateFile, stateJson, 'utf8');
+      
+      // Verify the write succeeded
+      if (fs.existsSync(this.stateFile)) {
+        log.info(`[RateLimiter] ✅ State file written successfully to: ${this.stateFile}`);
+      } else {
+        log.error(`[RateLimiter] ❌ State file write failed - file does not exist after write`);
+      }
+    } catch (error) {
+      log.error(`[RateLimiter] ❌ Failed to write state file: ${error}`);
+      if (error instanceof Error) {
+        log.error(`[RateLimiter] Error details: ${error.message}`);
+        log.error(`[RateLimiter] Stack: ${error.stack}`);
+      }
+      throw error; // Re-throw so caller knows write failed
+    }
   }
   
   /**
@@ -80,7 +111,9 @@ export class RateLimiter {
    */
   updateFromHeaders(headers: Record<string, string>): void {
     log.debug(`[RateLimiter] updateFromHeaders() called`);
-    const parsed = parseRateLimitHeaders(headers);
+    // Normalize header keys to lowercase for consistent parsing
+    const normalizedHeaders = normalizeHeaders(headers);
+    const parsed = parseRateLimitHeaders(normalizedHeaders);
     
     if (!parsed.limit || parsed.remaining === undefined) {
       log.warn('[RateLimiter] Headers missing limit or remaining - cannot update');

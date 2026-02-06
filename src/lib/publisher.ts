@@ -2,7 +2,7 @@ import type { AtpAgent } from '@atproto/api';
 import { formatDuration, formatDate } from '../utils/helpers.js';
 import { isImportCancelled } from '../utils/killswitch.js';
 import { RateLimiter } from '../utils/rate-limiter.js';
-import { isRateLimitError } from '../utils/rate-limit-headers.js';
+import { isRateLimitError, normalizeHeaders } from '../utils/rate-limit-headers.js';
 import { formatLocaleNumber } from '../utils/platform.js';
 import { generateTIDFromISO } from '../utils/tid.js';
 import type { PlayRecord, Config, PublishResult } from '../types.js';
@@ -160,13 +160,37 @@ export async function publishRecordsWithApplyWrites(
 
       // Update limiter from any headers the server returned
       try {
-        const respHeaders = (response as any)?.headers || (response as any)?.data?.headers;
-        if (respHeaders) {
-          log.debug(`[publisher.ts] Updating rate limiter from response headers`);
-          rl.updateFromHeaders(respHeaders as Record<string,string>);
+        let respHeaders: Record<string, string> | undefined;
+        
+        // Try different paths where headers might be stored in the response
+        if ((response as any)?.headers) {
+          respHeaders = (response as any).headers;
+          log.debug(`[publisher.ts] Found headers in response.headers`);
+        } else if ((response as any)?.data?.headers) {
+          respHeaders = (response as any).data.headers;
+          log.debug(`[publisher.ts] Found headers in response.data.headers`);
+        }
+        
+        if (respHeaders && Object.keys(respHeaders).length > 0) {
+          const normalizedHeaders = normalizeHeaders(respHeaders);
+          const headerKeys = Object.keys(normalizedHeaders);
+          const hasRateLimitHeaders = headerKeys.some(k => k.includes('ratelimit'));
+          
+          if (hasRateLimitHeaders) {
+            log.debug(`[publisher.ts] Updating rate limiter from successful response (${headerKeys.filter(k => k.includes('ratelimit')).join(', ')})`);
+            try {
+              rl.updateFromHeaders(normalizedHeaders);
+            } catch (updateError) {
+              log.error(`[publisher.ts] ❌ Failed to update rate limiter from headers: ${updateError}`);
+            }
+          } else {
+            log.debug(`[publisher.ts] No rate limit headers in successful response`);
+          }
+        } else {
+          log.debug(`[publisher.ts] No headers found in successful response`);
         }
       } catch (e) {
-        log.debug(`[publisher.ts] Could not extract headers from response: ${e}`);
+        log.error(`[publisher.ts] ❌ Error extracting headers from response: ${e}`);
       }
 
       i += batch.length;
@@ -181,8 +205,53 @@ export async function publishRecordsWithApplyWrites(
 
       if (rateLimitError) {
         log.warn('Rate limit hit! Inspecting server headers...');
-        const headers = err.response?.headers || err.headers || err.data?.headers || {};
-        log.debug(`[publisher.ts] Rate limit error headers: ${JSON.stringify(Object.keys(headers))}`);
+        
+        // Extract headers from various possible locations in the error object
+        let headers: Record<string, string> = {};
+        
+        // Try different paths where headers might be stored
+        if (err.response?.headers) {
+          headers = err.response.headers;
+          log.debug(`[publisher.ts] Found headers in err.response.headers`);
+        } else if (err.headers) {
+          headers = err.headers;
+          log.debug(`[publisher.ts] Found headers in err.headers`);
+        } else if (err.data?.headers) {
+          headers = err.data.headers;
+          log.debug(`[publisher.ts] Found headers in err.data.headers`);
+        } else {
+          // Log the error structure to help debug
+          log.warn(`[publisher.ts] Could not find headers in error. Error keys: ${JSON.stringify(Object.keys(err))}`);
+          if (err.response) {
+            log.debug(`[publisher.ts] err.response keys: ${JSON.stringify(Object.keys(err.response))}`);
+          }
+        }
+        
+        // Log what headers we found
+        if (headers && Object.keys(headers).length > 0) {
+          const normalizedHeaders = normalizeHeaders(headers);
+          const headerKeys = Object.keys(normalizedHeaders);
+          log.debug(`[publisher.ts] Found ${headerKeys.length} headers: ${headerKeys.join(', ')}`);
+          
+          // Check for rate limit specific headers
+          const hasRateLimitHeaders = headerKeys.some(k => k.includes('ratelimit'));
+          if (hasRateLimitHeaders) {
+            log.info(`[publisher.ts] Rate limit headers found - updating state`);
+            try {
+              rl.updateFromHeaders(normalizedHeaders);
+            } catch (updateError) {
+              log.error(`[publisher.ts] ❌ Failed to update rate limiter from error headers: ${updateError}`);
+              if (updateError instanceof Error) {
+                log.error(`[publisher.ts] Error stack: ${updateError.stack}`);
+              }
+            }
+          } else {
+            log.warn(`[publisher.ts] No rate limit headers in response (headers: ${headerKeys.join(', ')})`);
+          }
+        } else {
+          log.warn(`[publisher.ts] No headers found in rate limit error response`);
+        }
+        
         // Wait for permit for this batch (this will wait until reset if necessary)
         const batchPoints = batch.length * POINTS_PER_RECORD;
         log.debug(`[publisher.ts] Waiting for rate limit reset, requesting ${batchPoints} points...`);
