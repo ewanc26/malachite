@@ -1,7 +1,7 @@
 /**
  * Utility functions for the Last.fm importer
  */
-import type { Config } from '../types.js';
+import type { Config, PlayRecord } from '../types.js';
 
 /**
  * Get user's locale from environment or default to system locale
@@ -127,6 +127,42 @@ export function calculateOptimalBatchSize(totalRecords: number, batchDelay: numb
   
   // Ensure batch size is at least 3
   return Math.max(3, optimalSize);
+}
+
+/**
+ * Normalize a string for comparison (lowercase, remove extra spaces, punctuation)
+ * Used for duplicate detection and record matching
+ */
+export function normalizeString(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '') // Remove punctuation
+    .replace(/\s+/g, ' ')     // Normalize whitespace
+    .trim();
+}
+
+/**
+ * Sort records chronologically
+ * @param records - Records to sort
+ * @param reverseChronological - If true, sort newest first; otherwise sort oldest first
+ * @returns Sorted records
+ */
+export function sortRecords(records: PlayRecord[], reverseChronological = false): PlayRecord[] {
+  console.log(`Sorting records ${reverseChronological ? 'newest' : 'oldest'} first...`);
+
+  records.sort((a, b) => {
+    const timeA = new Date(a.playedTime).getTime();
+    const timeB = new Date(b.playedTime).getTime();
+    return reverseChronological ? timeB - timeA : timeA - timeB;
+  });
+
+  const firstPlay = formatDate(records[0].playedTime);
+  const lastPlay = formatDate(records[records.length - 1].playedTime);
+  console.log(`✓ Sorted ${records.length} records`);
+  console.log(`  First: ${firstPlay}`);
+  console.log(`  Last: ${lastPlay}\n`);
+
+  return records;
 }
 
 /**

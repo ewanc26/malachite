@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import { parse } from 'csv-parse/sync';
 import type { LastFmCsvRecord, PlayRecord, Config } from '../types.js';
-import { formatDate } from '../utils/helpers.js';
 import { buildClientAgent } from '../config.js';
 
 /**
@@ -221,25 +220,4 @@ export function convertToPlayRecord(csvRecord: LastFmCsvRecord, config: Config, 
   playRecord.originUrl = `https://www.last.fm/music/${artistEncoded}/_/${trackEncoded}`;
 
   return playRecord;
-}
-
-/**
- * Sort records chronologically
- */
-export function sortRecords(records: PlayRecord[], reverseChronological = false): PlayRecord[] {
-  console.log(`Sorting records ${reverseChronological ? 'newest' : 'oldest'} first...`);
-
-  records.sort((a, b) => {
-    const timeA = new Date(a.playedTime).getTime();
-    const timeB = new Date(b.playedTime).getTime();
-    return reverseChronological ? timeB - timeA : timeA - timeB;
-  });
-
-  const firstPlay = formatDate(records[0].playedTime);
-  const lastPlay = formatDate(records[records.length - 1].playedTime);
-  console.log(`✓ Sorted ${records.length} records`);
-  console.log(`  First: ${firstPlay}`);
-  console.log(`  Last: ${lastPlay}\n`);
-
-  return records;
 }
