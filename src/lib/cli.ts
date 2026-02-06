@@ -30,6 +30,7 @@ import {
   clearImportState,
   ImportState,
 } from '../utils/import-state.js';
+import { formatLocaleNumber } from '../utils/platform.js';
 
 /**
  * Show help message
@@ -593,13 +594,13 @@ export async function runCLI(): Promise<void> {
       records = csvRecords.map(record => convertToPlayRecord(record, cfg, isDebug));
     }
 
-    log.success(`Loaded ${rawRecordCount.toLocaleString()} records`);
+    log.success(`Loaded ${formatLocaleNumber(rawRecordCount)} records`);
 
     const dedupResult = deduplicateInputRecords(records);
     records = dedupResult.unique;
     if (dedupResult.duplicates > 0) {
-      log.warn(`Removed ${dedupResult.duplicates.toLocaleString()} duplicate(s) from input data`);
-      log.info(`Unique records: ${records.length.toLocaleString()}`);
+      log.warn(`Removed ${formatLocaleNumber(dedupResult.duplicates)} duplicate(s) from input data`);
+      log.info(`Unique records: ${formatLocaleNumber(records.length)}`);
     } else {
       log.info(`No duplicates found in input data`);
     }
