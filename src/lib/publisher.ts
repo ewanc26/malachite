@@ -58,13 +58,14 @@ export async function publishRecordsWithApplyWrites(
   const POINTS_PER_RECORD = 3; // approximate cost per create operation
 
   // Persistent rate limiter (reads/writes ~/.malachite/state/rate-limit.json)
-  const rl = new RateLimiter({ safety: config.SAFETY_MARGIN });
+  // Use headroom threshold instead of safety margin for better rate limit handling
+  const rl = new RateLimiter({ headroom: 0.15 }); // Preserve 15% buffer before hitting limit
 
   log.section('Conservative Adaptive Import');
   log.info(`Initial batch size: ${currentBatchSize} records (conservative)`);
   log.info(`Initial delay: ${currentBatchDelay}ms (2 seconds - very safe)`);
   log.debug(`[publisher.ts] MAX_APPLY_WRITES_OPS=${MAX_APPLY_WRITES_OPS}, POINTS_PER_RECORD=${POINTS_PER_RECORD}`);
-  log.debug(`[publisher.ts] Safety margin: ${config.SAFETY_MARGIN}, Records per day limit: ${formatLocaleNumber(config.RECORDS_PER_DAY_LIMIT)}`);
+  log.debug(`[publisher.ts] Headroom threshold: 15%, Records per day limit: ${formatLocaleNumber(config.RECORDS_PER_DAY_LIMIT)}`);
   log.info(`Will automatically adjust based on server response`);
   log.info(`Using conservative settings to protect your PDS`);
   log.blank();
