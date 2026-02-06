@@ -67,6 +67,8 @@ export interface CommandLineArgs {
   verbose?: boolean;
   quiet?: boolean;
   dev?: boolean;
+  // Optional PDS override URL to skip identity resolution
+  pds?: string;
   
   // Legacy flags (for backwards compatibility)
   file?: string;

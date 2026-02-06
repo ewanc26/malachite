@@ -251,6 +251,19 @@ pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
 | `--batch-delay <ms>` | `-d` | Delay between batches in ms | `500` (min) |
 | `--help` | | Show help message | - |
 
+### PDS Override
+
+If you already know the base URL of your Personal Data Server (PDS) you can bypass the Slingshot identity resolver and provide it directly with the `--pds` flag. This is useful for private instances, testing, or when the resolver is unreliable.
+
+| Option | Description |
+|--------|-------------|
+| `--pds <url>` | PDS base URL to use for authentication and API calls (e.g. `https://pds.example.com`). When provided, Malachite will skip Slingshot lookup and use this URL directly. |
+
+Notes:
+- The `--pds` flag overrides the configured Slingshot resolver for identity lookup. If `--pds` is given, Malachite will attempt to authenticate directly against the supplied PDS using your handle/DID and app password.
+- Use the full base URL (including scheme), e.g. `https://pds.example.com`.
+- If authentication fails when using `--pds`, try removing the flag so Malachite can resolve your PDS automatically via Slingshot.
+
 ### Legacy Flags (Backwards Compatible)
 
 These old flags still work but are deprecated:

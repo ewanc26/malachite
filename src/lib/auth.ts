@@ -12,24 +12,24 @@ interface ResolvedIdentity {
 /**
  * Resolves an AT Protocol identifier (handle or DID) to get PDS information
  */
-async function resolveIdentifier(identifier: string): Promise<ResolvedIdentity> {
+async function resolveIdentifier(identifier: string, resolverBase: string): Promise<ResolvedIdentity> {
   ui.startSpinner(`Resolving identifier: ${identifier}`);
-  
+
   try {
     const response = await fetch(
-      `https://slingshot.microcosm.blue/xrpc/com.bad-example.identity.resolveMiniDoc?identifier=${encodeURIComponent(identifier)}`
+      `${resolverBase}/xrpc/com.bad-example.identity.resolveMiniDoc?identifier=${encodeURIComponent(identifier)}`
     );
-    
+
     if (!response.ok) {
       throw new Error(`Failed to resolve identifier: ${response.status} ${response.statusText}`);
     }
-    
+
     const data = await response.json() as ResolvedIdentity;
-    
+
     if (!data.did || !data.pds) {
       throw new Error('Invalid response from identity resolver');
     }
-    
+
     ui.succeedSpinner(`Resolved to PDS: ${data.pds}`);
     return data;
   } catch (error) {
@@ -44,7 +44,7 @@ async function resolveIdentifier(identifier: string): Promise<ResolvedIdentity> 
 export async function login(
   identifier: string | undefined,
   password: string | undefined,
-  _resolverUrl?: string // Keep parameter for backwards compatibility but don't use it
+  resolverOrPds?: string // If this contains the Slingshot resolver base, it will be used to resolve; otherwise treated as a PDS override URL
 ): Promise<AtpAgent> {
   ui.header('ATProto Login');
   
@@ -64,9 +64,25 @@ export async function login(
   console.log('');
   
   try {
-    // Resolve the identifier to get PDS and other info
-    const resolved = await resolveIdentifier(identifier);
-    
+    // If resolverOrPds is provided and does NOT look like the Slingshot resolver,
+    // treat it as a PDS override and skip identity resolution.
+    const isSlingshot = resolverOrPds?.includes('slingshot') ?? false;
+
+    if (resolverOrPds && !isSlingshot) {
+      ui.startSpinner(`Using provided PDS: ${resolverOrPds}`);
+      const agent = new AtpAgent({ service: resolverOrPds });
+      await agent.login({ identifier: identifier!, password: password });
+      ui.succeedSpinner('Logged in successfully (PDS override)!');
+      ui.keyValue('DID', agent.session?.did || 'unknown');
+      ui.keyValue('Handle', agent.session?.handle || 'unknown');
+      console.log('');
+      return agent;
+    }
+
+    // Otherwise use the resolver (provided or default) to resolve identifier
+    const resolverBase = resolverOrPds || 'https://slingshot.microcosm.blue';
+    const resolved = await resolveIdentifier(identifier, resolverBase);
+
     // Initialize the agent with the resolved PDS URL
     ui.startSpinner('Logging in...');
     const agent = new AtpAgent({
@@ -78,12 +94,12 @@ export async function login(
       identifier: resolved.did,
       password: password,
     });
-    
+
     ui.succeedSpinner('Logged in successfully!');
     ui.keyValue('DID', agent.session?.did || 'unknown');
     ui.keyValue('Handle', agent.session?.handle || 'unknown');
     console.log('');
-    
+
     return agent;
   } catch (error) {
     const err = error as Error;
