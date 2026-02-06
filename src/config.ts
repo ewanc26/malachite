@@ -35,7 +35,7 @@ export const DEFAULT_BATCH_DELAY = 2000; // Start with 2 seconds between batches
 export const MIN_BATCH_DELAY = 1000;
 
 // Maximum batch size (PDS limit is 200 operations per call)
-export const MAX_BATCH_SIZE = 200;
+export const MAX_BATCH_SIZE = 100; // Stay well below the 200 limit for safety
 
 // Slingshot resolver URL
 export const SLINGSHOT_RESOLVER = 'https://slingshot.microcosm.blue';
@@ -43,7 +43,7 @@ export const SLINGSHOT_RESOLVER = 'https://slingshot.microcosm.blue';
 const config: Config = {
   RECORD_TYPE,
   MIN_RECORDS_FOR_SCALING: 20,
-  BASE_BATCH_SIZE: 200,  // Match DEFAULT_BATCH_SIZE for consistency
+  BASE_BATCH_SIZE: DEFAULT_BATCH_SIZE,  // Match DEFAULT_BATCH_SIZE for consistency
   SCALING_FACTOR: 1.5,
   DEFAULT_BATCH_SIZE,
   DEFAULT_BATCH_DELAY,
