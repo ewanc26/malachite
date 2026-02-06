@@ -46,6 +46,7 @@ ${'\x1b[1m'}USAGE:${'\x1b[0m'}
 ${'\x1b[1m'}AUTHENTICATION:${'\x1b[0m'}
   -h, --handle <handle>          ATProto handle or DID (e.g., user.bsky.social)
   -p, --password <password>      ATProto app password
+  --pds <url>                    PDS base URL to bypass identity resolution (optional)
 
 ${'\x1b[1m'}INPUT:${'\x1b[0m'}
   -i, --input <path>             Path to Last.fm CSV or Spotify JSON export
@@ -131,6 +132,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
     handle: { type: 'string', short: 'h' },
     password: { type: 'string', short: 'p' },
     input: { type: 'string', short: 'i' },
+    pds: { type: 'string' },
     'spotify-input': { type: 'string' },
     mode: { type: 'string', short: 'm' },
     'batch-size': { type: 'string', short: 'b' },
@@ -162,6 +164,7 @@ export function parseCommandLineArgs(): CommandLineArgs {
       help: values.help,
       handle: values.handle || values.identifier,
       password: values.password,
+        pds: values.pds,
       input: values.input || values.file,
       'spotify-input': values['spotify-input'] || values['spotify-file'],
       'batch-size': values['batch-size'],
@@ -493,7 +496,7 @@ export async function runCLI(): Promise<void> {
       }
       log.section('Clear Cache');
       log.info('Authenticating to identify cache...');
-      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+      agent = await login(args.handle, args.password, args.pds ?? cfg.SLINGSHOT_RESOLVER) as AtpAgent;
       const did = agent.session?.did;
       if (!did) {
         throw new Error('Failed to get DID from session');
@@ -531,7 +534,7 @@ export async function runCLI(): Promise<void> {
         }
       }
       log.section('Remove Duplicate Records');
-      agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+      agent = await login(args.handle, args.password, args.pds ?? cfg.SLINGSHOT_RESOLVER) as AtpAgent;
       const result = await removeDuplicates(agent, cfg, dryRun);
       if (result.totalDuplicates === 0) {
         return;
@@ -566,7 +569,7 @@ export async function runCLI(): Promise<void> {
       }
     }
     log.debug('Authenticating...');
-    agent = await login(args.handle, args.password, cfg.SLINGSHOT_RESOLVER) as AtpAgent;
+    agent = await login(args.handle, args.password, args.pds ?? cfg.SLINGSHOT_RESOLVER) as AtpAgent;
     log.debug('Authentication successful');
 
     log.section('Loading Records');
