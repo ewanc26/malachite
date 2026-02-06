@@ -1,7 +1,7 @@
 import type { PlayRecord, Config } from '../types.js';
 import { parseLastFmCsv, convertToPlayRecord } from './csv.js';
 import { parseSpotifyJson, convertSpotifyToPlayRecord } from './spotify.js';
-import { formatDate } from '../utils/helpers.js';
+import { formatDate, normalizeString } from '../utils/helpers.js';
 import { log } from '../utils/logger.js';
 
 /**
@@ -13,17 +13,6 @@ interface NormalizedRecord {
   normalizedArtist: string;
   timestamp: number;
   source: 'lastfm' | 'spotify';
-}
-
-/**
- * Normalize a string for comparison (lowercase, remove extra spaces, punctuation)
- */
-function normalizeString(str: string): string {
-  return str
-    .toLowerCase()
-    .replace(/[^\w\s]/g, '') // Remove punctuation
-    .replace(/\s+/g, ' ')     // Normalize whitespace
-    .trim();
 }
 
 /**

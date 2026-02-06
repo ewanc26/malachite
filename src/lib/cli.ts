@@ -3,11 +3,12 @@ import { parseArgs } from 'node:util';
 import { AtpAgent } from '@atproto/api';
 import type { PlayRecord, Config, CommandLineArgs, PublishResult } from '../types.js';
 import { login } from './auth.js';
-import { parseLastFmCsv, convertToPlayRecord, sortRecords } from '../lib/csv.js';
-import { parseSpotifyJson, convertSpotifyToPlayRecord, sortSpotifyRecords } from '../lib/spotify.js';
+import { parseLastFmCsv, convertToPlayRecord } from '../lib/csv.js';
+import { parseSpotifyJson, convertSpotifyToPlayRecord } from '../lib/spotify.js';
 import { parseCombinedExports } from '../lib/merge.js';
 import { publishRecordsWithApplyWrites } from './publisher.js';
 import { prompt, confirm } from '../utils/input.js';
+import { sortRecords } from '../utils/helpers.js';
 import config from '../config.js';
 import { calculateOptimalBatchSize } from '../utils/helpers.js';
 import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates, deduplicateInputRecords } from './sync.js';
@@ -627,9 +628,7 @@ export async function runCLI(): Promise<void> {
 
     if (mode !== 'combined') {
       log.debug(`Sorting records (reverse: ${args.reverse})...`);
-      records = mode === 'spotify'
-        ? sortSpotifyRecords(records, args.reverse ?? false)
-        : sortRecords(records, args.reverse ?? false);
+      records = sortRecords(records, args.reverse ?? false);
     }
 
     log.section('Batch Configuration');
