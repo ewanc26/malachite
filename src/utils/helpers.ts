@@ -148,6 +148,10 @@ export function normalizeString(str: string): string {
  * @returns Sorted records
  */
 export function sortRecords(records: PlayRecord[], reverseChronological = false): PlayRecord[] {
+  if (records.length === 0) {
+    return records;
+  }
+
   console.log(`Sorting records ${reverseChronological ? 'newest' : 'oldest'} first...`);
 
   records.sort((a, b) => {
