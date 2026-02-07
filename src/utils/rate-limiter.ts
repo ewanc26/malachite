@@ -281,19 +281,24 @@ export class RateLimiter {
    * This combines reserveQuota and waitForReset logic:
    * - If quota is available, reserves it immediately
    * - If quota is exhausted, waits until reset and then reserves
+   * - Automatically loops until permit is granted
    */
   async waitForPermit(pointsNeeded: number): Promise<boolean> {
-    // Try to reserve quota first
-    const reserved = await this.reserveQuota(pointsNeeded);
-    if (reserved) {
-      return true; // Got the permit immediately
+    while (true) {
+      // Try to reserve quota first
+      const reserved = await this.reserveQuota(pointsNeeded);
+      if (reserved) {
+        log.debug(`[RateLimiter] ✅ Permit granted for ${pointsNeeded} points`);
+        return true; // Got the permit
+      }
+      
+      // Quota exhausted - wait for reset
+      log.info(`[RateLimiter] Quota exhausted, waiting for reset...`);
+      await this.waitForReset();
+      
+      log.info(`[RateLimiter] Reset complete, retrying reservation...`);
+      // Loop will retry reservation
     }
-    
-    // Quota exhausted - wait for reset
-    await this.waitForReset();
-    
-    // Try again after reset
-    return await this.reserveQuota(pointsNeeded);
   }
   
   /**
