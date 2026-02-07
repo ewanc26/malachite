@@ -551,6 +551,10 @@ export class RateLimiter {
    * 4. Calculate: remaining - (limit × threshold)
    * 5. Return max(0, safe_points)
    * 
+   * IMPORTANT: When quota is low (below headroom), this returns 0 to signal
+   * that we should slow down, but the publisher should use sliding window
+   * recovery (gradual pacing) rather than waiting for full reset.
+   * 
    * EXAMPLE:
    * State: { limit: 5000, remaining: 4200 }
    * Headroom: 15% = 750 points
@@ -586,6 +590,24 @@ export class RateLimiter {
     
     log.debug(`[RateLimiter] Safe quota: ${safePoints} (${state.remaining} - ${headroomPoints} headroom)`);
     return safePoints;
+  }
+  
+  /**
+   * Get ACTUAL remaining points (without headroom buffer applied).
+   * Used by the pacer to calculate recovery strategies.
+   * 
+   * @returns Actual remaining points from server
+   */
+  getActualRemaining(): number {
+    const state = this.readState();
+    if (!state) return 0;
+    
+    const now = Math.floor(Date.now() / 1000);
+    if (now >= state.resetAt) {
+      return state.limit;
+    }
+    
+    return state.remaining;
   }
   
   /**

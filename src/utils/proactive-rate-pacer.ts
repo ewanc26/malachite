@@ -119,7 +119,8 @@ export class ProactiveRatePacer {
    * QUOTA HEALTH ADJUSTMENT:
    * - >60% quota: Use target rate (80% of max)
    * - 30-60% quota: Slow down to 60% of max
-   * - <30% quota: Conservative 40% of max
+   * - 15-30% quota: Conservative 40% of max
+   * - <15% quota: RECOVERY MODE - use 10% of max to rebuild quota
    * 
    * This creates automatic backpressure as quota depletes while
    * still maintaining progress.
@@ -127,7 +128,7 @@ export class ProactiveRatePacer {
    * @param batchSize Number of records in batch we just sent
    * @param serverLimit Total server capacity (e.g., 5000)
    * @param windowSeconds Window duration (e.g., 3600 = 1 hour)
-   * @param currentRemaining Current quota remaining
+   * @param currentRemaining Current ACTUAL quota remaining (not safe quota)
    * @returns Optimal delay calculation
    */
   calculateDelay(
@@ -147,7 +148,12 @@ export class ProactiveRatePacer {
     let targetUtilization = this.TARGET_UTILIZATION;
     let reason = `Target rate: ${(targetUtilization * 100).toFixed(0)}% of maximum`;
     
-    if (quotaHealthPercent < 30) {
+    // CRITICAL: Recovery mode for very low quota
+    // Use only 10% of max rate to allow quota to rebuild via sliding window
+    if (quotaHealthPercent < 15) {
+      targetUtilization = 0.10;
+      reason = `Recovery mode (${quotaHealthPercent.toFixed(1)}% quota): 10% rate to rebuild`;
+    } else if (quotaHealthPercent < 30) {
       // Low quota: be very conservative
       targetUtilization = 0.40;
       reason = `Low quota (${quotaHealthPercent.toFixed(0)}%): conservative 40% rate`;
@@ -190,6 +196,7 @@ export class ProactiveRatePacer {
    * STRATEGY:
    * - Calculate sustainable rate
    * - Determine batch size that takes ~30-60 seconds at that rate
+   * - SPECIAL: For very low quota, use tiny batches to allow recovery
    * - This provides good balance between:
    *   - Progress (not too small)
    *   - Smoothness (not too large/bursty)
@@ -197,7 +204,7 @@ export class ProactiveRatePacer {
    * 
    * @param serverLimit Total server capacity
    * @param windowSeconds Window duration
-   * @param currentRemaining Current quota remaining
+   * @param currentRemaining Current ACTUAL remaining (not safe quota)
    * @param maxBatchSize Hard limit (PDS max = 200)
    * @returns Recommended batch size
    */
@@ -214,6 +221,14 @@ export class ProactiveRatePacer {
     // Quota health determines target rate
     const quotaHealthPercent = (currentRemaining / serverLimit) * 100;
     let targetUtilization = this.TARGET_UTILIZATION;
+    
+    // CRITICAL: For very low quota (<15%), use RECOVERY MODE
+    // Use tiny batches (1-5 records) with long delays to allow quota to rebuild
+    if (quotaHealthPercent < 15) {
+      const recoverySize = Math.max(1, Math.min(5, Math.floor(currentRemaining / this.POINTS_PER_RECORD)));
+      log.info(`[ProactiveRatePacer] 🔄 Recovery mode (${quotaHealthPercent.toFixed(1)}% quota): ${recoverySize} records/batch`);
+      return recoverySize;
+    }
     
     if (quotaHealthPercent < 30) {
       targetUtilization = 0.40;
