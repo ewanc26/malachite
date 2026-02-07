@@ -2,6 +2,8 @@ import type { AtpAgent } from '@atproto/api';
 import { formatDuration, formatDate } from '../utils/helpers.js';
 import { isImportCancelled } from '../utils/killswitch.js';
 import { RateLimiter } from '../utils/rate-limiter.js';
+import { DynamicBatchCalculator } from '../utils/dynamic-batch-calculator.js';
+import { ProactiveRatePacer } from '../utils/proactive-rate-pacer.js';
 import { isRateLimitError, normalizeHeaders } from '../utils/rate-limit-headers.js';
 import { formatLocaleNumber } from '../utils/platform.js';
 import { generateTIDFromISO } from '../utils/tid.js';
@@ -15,32 +17,42 @@ import {
 } from '../utils/import-state.js';
 
 /**
- * Maximum operations allowed per applyWrites call
- * PDS allows up to 200 operations per call. Each create operation costs 3 rate limit points.
- * We use the full limit for maximum performance.
- * See: https://github.com/bluesky-social/atproto/blob/main/packages/pds/src/api/com/atproto/repo/applyWrites.ts
+ * Maximum operations allowed per applyWrites call (PDS hard limit)
  */
-const MAX_APPLY_WRITES_OPS = 200;
+const MAX_PDS_BATCH_SIZE = 200;
 
 /**
- * Minimum batch size to maintain reasonable progress
+ * Points cost per record in ATProto
  */
-const MIN_BATCH_SIZE = 1;
+const POINTS_PER_RECORD = 3;
 
 /**
- * Maximum batch size (same as MAX_APPLY_WRITES_OPS)
- */
-const MAX_BATCH_SIZE = 200;
-
-/**
- * Publish records using com.atproto.repo.applyWrites for efficient batching
- * with adaptive rate limiting and stateful resume support
+ * Publish records using PROACTIVE rate limiting - never hits rate limits
+ * 
+ * NEW STRATEGY (Proactive):
+ * - Calculate optimal delays to maintain sustainable rate
+ * - Spread requests evenly over time
+ * - Never approach headroom threshold
+ * - Adapt delays based on quota health
+ * 
+ * SLIDING WINDOW INSIGHT:
+ * ATProto rate limits use sliding windows where points used at time T
+ * become available at time T + window_duration. By pacing our requests
+ * appropriately, we create a steady state where old points become available
+ * as we need new ones - maintaining constant throughput without ever
+ * hitting limits.
+ * 
+ * EXAMPLE:
+ * Server: 5000 points/hour
+ * Target rate: 80% of max = 0.37 rec/s
+ * Batch 50 records → wait 135s → steady state at 4000 points
+ * Never hits 750-point headroom threshold!
  */
 export async function publishRecordsWithApplyWrites(
   agent: AtpAgent | null,
   records: PlayRecord[],
-  batchSize: number,
-  batchDelay: number,
+  _initialBatchSize: number, // Ignored - kept for backwards compatibility
+  _batchDelay: number, // Ignored - kept for backwards compatibility
   config: Config,
   dryRun = false,
   syncMode = false,
@@ -50,51 +62,64 @@ export async function publishRecordsWithApplyWrites(
   const totalRecords = records.length;
 
   if (dryRun) {
-    return handleDryRun(records, batchSize, batchDelay, config, syncMode);
+    return handleDryRun(records, config, syncMode);
   }
 
   if (!agent) {
     throw new Error('Agent is required for publishing');
   }
 
-  // Start with conservative settings
-  let currentBatchSize = Math.min(batchSize, MAX_APPLY_WRITES_OPS);
-  let currentBatchDelay = batchDelay;
+  // Initialize systems
+  const rl = new RateLimiter({ headroom: 0.15 });
+  const calculator = new DynamicBatchCalculator(); // For performance metrics
+  const pacer = new ProactiveRatePacer(); // NEW: Proactive pacing
   
-  // Adaptive rate limiting state
-  let consecutiveSuccesses = 0;
-  let consecutiveFailures = 0;
-  const MAX_CONSECUTIVE_FAILURES = 3;
-  const POINTS_PER_RECORD = 3; // approximate cost per create operation
-  
-  /**
-   * Calculate optimal batch size based on available rate limit points
-   */
-  const calculateOptimalBatchSize = (availablePoints: number): number => {
-    // Calculate how many records we can fit in available points
-    const maxRecordsFromQuota = Math.floor(availablePoints / POINTS_PER_RECORD);
-    
-    // Clamp to our min/max bounds
-    const optimalSize = Math.max(MIN_BATCH_SIZE, Math.min(maxRecordsFromQuota, MAX_BATCH_SIZE));
-    
-    log.debug(`[publisher.ts] calculateOptimalBatchSize: availablePoints=${availablePoints}, maxRecords=${maxRecordsFromQuota}, optimal=${optimalSize}`);
-    return optimalSize;
-  };
-
-  // Persistent rate limiter (reads/writes ~/.malachite/state/rate-limit.json)
-  // Use headroom threshold instead of safety margin for better rate limit handling
-  const rl = new RateLimiter({ headroom: 0.15 }); // Preserve 15% buffer before hitting limit
-
-  log.section('Dynamic Adaptive Import');
-  log.info(`Initial batch size: ${currentBatchSize} records`);
-  log.info(`Batch size range: ${MIN_BATCH_SIZE}-${MAX_BATCH_SIZE} records (adjusts based on available quota)`);
-  log.info(`Initial delay: ${currentBatchDelay}ms`);
-  log.debug(`[publisher.ts] MAX_APPLY_WRITES_OPS=${MAX_APPLY_WRITES_OPS}, POINTS_PER_RECORD=${POINTS_PER_RECORD}`);
-  log.debug(`[publisher.ts] Headroom threshold: 15%, Records per day limit: ${formatLocaleNumber(config.RECORDS_PER_DAY_LIMIT)}`);
-  log.info(`Batch size will automatically scale based on rate limit quota`);
-  log.info(`Delay will adjust based on server response`);
+  log.section('Proactive Rate-Limited Import');
+  log.info(`🎯 Proactive pacing strategy: Never hit rate limits`);
+  log.info(`📊 Batch size: Optimized for sustainable throughput`);
+  log.info(`⏱️  Delay: Calculated to maintain steady rate below limit`);
+  log.info(`🔄 Sliding window: Points recover as we use them`);
   log.blank();
-  log.info(`Publishing ${formatLocaleNumber(totalRecords)} records using adaptive batching...`);
+  
+  // Check if we already know server capacity
+  const serverCapacity = rl.getServerCapacity();
+  let currentBatchSize: number;
+  let currentDelay: number;
+  
+  if (serverCapacity) {
+    // We have server info - calculate optimal batch size
+    const safePoints = rl.getSafeAvailablePoints();
+    currentBatchSize = pacer.calculateOptimalBatchSize(
+      serverCapacity.limit,
+      serverCapacity.windowSeconds,
+      safePoints,
+      MAX_PDS_BATCH_SIZE
+    );
+    
+    // Initial delay will be calculated after first batch
+    currentDelay = 500;
+    
+    log.info(`ℹ️  Using saved server info: ${serverCapacity.limit} points/${serverCapacity.windowSeconds}s`);
+    log.info(`ℹ️  Starting with optimal batch: ${currentBatchSize} records`);
+    
+    // Show estimated time to completion
+    const eta = pacer.estimateTimeToCompletion(
+      totalRecords,
+      serverCapacity.limit,
+      serverCapacity.windowSeconds,
+      safePoints
+    );
+    log.info(`⏱️  Estimated time: ~${formatDuration(eta * 1000)} at sustainable rate`);
+  } else {
+    // No previous info - start with probe
+    currentBatchSize = 10;
+    currentDelay = 500;
+    log.info(`🔍 No server info yet - starting with probe: ${currentBatchSize} records`);
+    log.info(`ℹ️  Will calculate optimal pacing after learning capacity`);
+  }
+  
+  log.blank();
+  log.info(`Publishing ${formatLocaleNumber(totalRecords)} records...`);
   log.warn('Press Ctrl+C to stop gracefully after current batch');
   log.blank();
 
@@ -102,45 +127,64 @@ export async function publishRecordsWithApplyWrites(
   let errorCount = 0;
   const startTime = Date.now();
 
-  // Resume from saved state if available
+  // Resume support
   let startIndex = importState ? getResumeStartIndex(importState) : 0;
   if (importState && startIndex > 0) {
     log.info(`Resuming from record ${startIndex + 1} (${(startIndex / totalRecords * 100).toFixed(1)}% complete)`);
-    log.debug(`[publisher.ts] Import state loaded, resuming at index=${startIndex}`);
     log.blank();
   }
 
   let i = startIndex;
-  let batchCounter = 0; // Track actual batch number across resume
+  let batchCounter = 0;
+  
   while (i < totalRecords) {
-    // Check killswitch before processing batch
+    // Check killswitch
     if (isImportCancelled()) {
       return handleCancellation(successCount, errorCount, totalRecords);
     }
 
-    // Adjust batch size based on available rate limit quota
+    // Get current server capacity and quota
+    const capacity = rl.getServerCapacity();
     const safePoints = rl.getSafeAvailablePoints();
-    const optimalSize = calculateOptimalBatchSize(safePoints);
     
-    // Only adjust if we need to (avoid log spam)
-    if (optimalSize !== currentBatchSize) {
-      const oldSize = currentBatchSize;
-      currentBatchSize = optimalSize;
-      log.info(`📊 Dynamic batch sizing: ${oldSize} → ${currentBatchSize} records (${safePoints} safe points available)`);
+    if (!capacity) {
+      // Still learning - use probe batch
+      log.debug('[Publisher] No capacity info yet, using probe batch');
+    } else {
+      // Calculate optimal batch size for current quota health
+      const optimalSize = pacer.calculateOptimalBatchSize(
+        capacity.limit,
+        capacity.windowSeconds,
+        safePoints,
+        MAX_PDS_BATCH_SIZE
+      );
+      
+      // Apply adaptive scaling from performance metrics
+      const adaptiveScale = calculator.calculateAdaptiveScale();
+      const scaledSize = Math.floor(optimalSize * adaptiveScale.scale);
+      const finalSize = Math.max(1, Math.min(scaledSize, MAX_PDS_BATCH_SIZE));
+      
+      // Update batch size if changed significantly
+      if (Math.abs(finalSize - currentBatchSize) > 5) {
+        log.info(`📊 Batch size: ${currentBatchSize} → ${finalSize} records`);
+        if (adaptiveScale.scale !== 1.0) {
+          log.info(`   └─ Adaptive: ×${adaptiveScale.scale.toFixed(2)} (${adaptiveScale.reason})`);
+        }
+        currentBatchSize = finalSize;
+      }
     }
 
     const batch = records.slice(i, Math.min(i + currentBatchSize, totalRecords));
-    batchCounter++; // Increment actual batch counter
+    batchCounter++;
     const progress = ((i / totalRecords) * 100).toFixed(1);
 
     log.progress(
-      `[${progress}%] Batch ${batchCounter} (records ${i + 1}-${Math.min(i + currentBatchSize, totalRecords)}) [size: ${currentBatchSize}, delay: ${currentBatchDelay}ms]`
+      `[${progress}%] Batch ${batchCounter} (${i + 1}-${Math.min(i + currentBatchSize, totalRecords)}) [${currentBatchSize} records]`
     );
-    log.debug(`[publisher.ts] Starting batch: index=${i}, size=${batch.length}`);
 
     const batchStartTime = Date.now();
 
-    // Build writes array for applyWrites with TID-based rkeys
+    // Build writes array
     const writes = await Promise.all(
       batch.map(async (record) => ({
         $type: 'com.atproto.repo.applyWrites#create',
@@ -150,15 +194,12 @@ export async function publishRecordsWithApplyWrites(
       }))
     );
 
-    // Reserve quota (points) for this batch before sending. This will wait until
-    // server reset if quota is exhausted (persisted across runs).
+    // Reserve quota
     const batchPoints = batch.length * POINTS_PER_RECORD;
-    log.debug(`[publisher.ts] Reserving quota: batch_size=${batch.length}, points=${batchPoints} (${POINTS_PER_RECORD} per record)`);
-    await rl.waitForPermit(batchPoints); // This will automatically wait and retry until permit is granted
+    await rl.waitForPermit(batchPoints);
 
     try {
-      // Call applyWrites with the batch
-      log.debug(`[publisher.ts] Sending applyWrites request for ${batch.length} records to PDS...`);
+      // Send batch
       const response = await agent.com.atproto.repo.applyWrites({
         repo: agent.session?.did || '',
         writes: writes as any,
@@ -167,126 +208,121 @@ export async function publishRecordsWithApplyWrites(
       // Success!
       const batchSuccessCount = response.data.results?.length || batch.length;
       successCount += batchSuccessCount;
-      consecutiveSuccesses++;
-      consecutiveFailures = 0;
-
       const batchDuration = Date.now() - batchStartTime;
-      log.debug(`[publisher.ts] Batch success: ${batchSuccessCount}/${batch.length} records published in ${batchDuration}ms`);
+      
+      // Record success metrics
+      calculator.recordSuccess(batch.length, batchDuration);
 
-      // Save state after successful batch
+      // Save state
       if (importState) {
         updateImportState(importState, i + batch.length - 1, batchSuccessCount, 0);
       }
 
-      // Speed up delay if we're doing well (after 5 consecutive successes)
-      // Note: Batch size is now controlled dynamically by rate limit quota
-      if (consecutiveSuccesses >= 5 && currentBatchDelay > config.MIN_BATCH_DELAY) {
-        const oldDelay = currentBatchDelay;
-        currentBatchDelay = Math.max(
-          config.MIN_BATCH_DELAY,
-          Math.floor(currentBatchDelay * 0.8)
-        );
-        if (oldDelay !== currentBatchDelay) {
-          log.info(`⚡ Speeding up delay! ${oldDelay}ms → ${currentBatchDelay}ms`);
-        }
-        consecutiveSuccesses = 0;
-      }
-
-      // Update limiter from any headers the server returned
+      // Update rate limiter from response headers
       try {
         let respHeaders: Record<string, string> | undefined;
-        
-        // Try different paths where headers might be stored in the response
         if ((response as any)?.headers) {
           respHeaders = (response as any).headers;
-          log.debug(`[publisher.ts] Found headers in response.headers`);
-        } else if ((response as any)?.data?.headers) {
-          respHeaders = (response as any).data.headers;
-          log.debug(`[publisher.ts] Found headers in response.data.headers`);
         }
         
         if (respHeaders && Object.keys(respHeaders).length > 0) {
-          const normalizedHeaders = normalizeHeaders(respHeaders);
-          const headerKeys = Object.keys(normalizedHeaders);
-          const hasRateLimitHeaders = headerKeys.some(k => k.includes('ratelimit'));
+          const normalized = normalizeHeaders(respHeaders);
+          const hasRateLimitHeaders = Object.keys(normalized).some(k => k.includes('ratelimit'));
           
           if (hasRateLimitHeaders) {
-            log.debug(`[publisher.ts] Updating rate limiter from successful response (${headerKeys.filter(k => k.includes('ratelimit')).join(', ')})`);
-            try {
-              rl.updateFromHeaders(normalizedHeaders);
-            } catch (updateError) {
-              log.error(`[publisher.ts] ❌ Failed to update rate limiter from headers: ${updateError}`);
+            rl.updateFromHeaders(normalized);
+            
+            // After first response, recalculate optimal settings
+            if (!rl.hasServerInfo() && batchCounter === 1) {
+              const newCap = rl.getServerCapacity();
+              if (newCap) {
+                const safeQuota = rl.getSafeAvailablePoints();
+                const newBatchSize = pacer.calculateOptimalBatchSize(
+                  newCap.limit,
+                  newCap.windowSeconds,
+                  safeQuota,
+                  MAX_PDS_BATCH_SIZE
+                );
+                
+                log.info(`🎓 Learned server capacity! Optimizing for sustainable throughput`);
+                log.info(`   Server: ${newCap.limit} points/${newCap.windowSeconds}s`);
+                log.info(`   Optimal batch: ${newBatchSize} records`);
+                
+                currentBatchSize = newBatchSize;
+                
+                // Show estimated completion time
+                const eta = pacer.estimateTimeToCompletion(
+                  totalRecords - successCount,
+                  newCap.limit,
+                  newCap.windowSeconds,
+                  safeQuota
+                );
+                log.info(`   ETA: ~${formatDuration(eta * 1000)}`);
+              }
             }
-          } else {
-            log.debug(`[publisher.ts] No rate limit headers in successful response`);
           }
-        } else {
-          log.debug(`[publisher.ts] No headers found in successful response`);
         }
       } catch (e) {
-        log.error(`[publisher.ts] ❌ Error extracting headers from response: ${e}`);
+        log.error(`Error updating from headers: ${e}`);
       }
 
       i += batch.length;
+      
+      // PROACTIVE PACING: Calculate optimal delay for next batch
+      const cap = rl.getServerCapacity();
+      if (cap && i < totalRecords) {
+        const currentQuota = rl.getSafeAvailablePoints();
+        const pacing = pacer.calculateDelay(
+          batch.length,
+          cap.limit,
+          cap.windowSeconds,
+          currentQuota
+        );
+        
+        // Update delay if changed significantly
+        if (Math.abs(pacing.delayMs - currentDelay) > 200) {
+          log.info(`⏱️  Pacing: ${currentDelay}ms → ${pacing.delayMs}ms (${pacing.reason})`);
+          currentDelay = pacing.delayMs;
+        }
+      }
 
     } catch (error) {
       const err = error as any;
-      consecutiveFailures++;
-      consecutiveSuccesses = 0;
+      const batchDuration = Date.now() - batchStartTime;
+      
+      // Record failure metrics
+      calculator.recordFailure(batch.length, batchDuration);
 
       const rateLimitError = isRateLimitError(err);
-      log.debug(`[publisher.ts] Batch error: rateLimitError=${rateLimitError}, consecutiveFailures=${consecutiveFailures}`);
 
       if (rateLimitError) {
-        log.warn('Rate limit hit! Inspecting server headers...');
+        log.warn('⚠️  Rate limit hit (unexpected with proactive pacing) - updating from error headers...');
         
-        // Extract headers from the error response
+        // Extract and update from error headers
         let headers: Record<string, string> | undefined;
         if (err?.response?.headers) {
           headers = err.response.headers;
-          log.debug(`[publisher.ts] Found headers in err.response.headers`);
         } else if (err?.headers) {
           headers = err.headers;
-          log.debug(`[publisher.ts] Found headers in err.headers`);
         }
         
         if (headers && Object.keys(headers).length > 0) {
-          const normalizedHeaders = normalizeHeaders(headers);
-          const headerKeys = Object.keys(normalizedHeaders);
-          log.debug(`[publisher.ts] Found ${headerKeys.length} headers: ${headerKeys.join(', ')}`);
-          
-          // Check for rate limit specific headers
-          const hasRateLimitHeaders = headerKeys.some(k => k.includes('ratelimit'));
+          const normalized = normalizeHeaders(headers);
+          const hasRateLimitHeaders = Object.keys(normalized).some(k => k.includes('ratelimit'));
           if (hasRateLimitHeaders) {
-            log.info(`[publisher.ts] Rate limit headers found - updating state`);
-            try {
-              rl.updateFromHeaders(normalizedHeaders);
-            } catch (updateError) {
-              log.error(`[publisher.ts] ❌ Failed to update rate limiter from error headers: ${updateError}`);
-              if (updateError instanceof Error) {
-                log.error(`[publisher.ts] Error stack: ${updateError.stack}`);
-              }
-            }
-          } else {
-            log.warn(`[publisher.ts] No rate limit headers in response (headers: ${headerKeys.join(', ')})`);
+            rl.updateFromHeaders(normalized);
           }
-        } else {
-          log.warn(`[publisher.ts] No headers found in rate limit error response`);
         }
         
-        // Wait for permit for this batch (this will automatically wait until reset and retry)
-        const batchPoints = batch.length * POINTS_PER_RECORD;
-        log.debug(`[publisher.ts] Waiting for rate limit reset, requesting ${batchPoints} points...`);
-        await rl.waitForPermit(batchPoints); // This will loop internally until permit is granted
-        continue; // Retry the same batch
+        // Wait for permit and retry
+        await rl.waitForPermit(batchPoints);
+        continue;
         
       } else {
-        // Other error - log and continue
+        // Other error - log and skip batch
         errorCount += batch.length;
         log.error(`Batch failed: ${err.message}`);
-        log.debug(`[publisher.ts] Error details: status=${err.response?.status}, code=${err.code}`);
         
-        // Log failed records
         batch.slice(0, 3).forEach((record) => {
           log.debug(`Failed: ${record.trackName} by ${record.artists[0]?.artistName}`);
         });
@@ -294,105 +330,73 @@ export async function publishRecordsWithApplyWrites(
           log.debug(`... and ${batch.length - 3} more failed`);
         }
 
-        // Save state with errors
         if (importState) {
           updateImportState(importState, i + batch.length - 1, 0, batch.length);
         }
-
-        // If too many consecutive failures, slow down delay
-        // Note: Batch size is now controlled dynamically by rate limit quota
-        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          const oldDelay = currentBatchDelay;
-          currentBatchDelay = Math.min(currentBatchDelay * 2, 10000);
-          if (oldDelay !== currentBatchDelay) {
-            log.warn(`📉 Multiple failures (${consecutiveFailures}): slowing delay to ${currentBatchDelay}ms`);
-          }
-          log.debug(`[publisher.ts] Slowing down due to consecutive failures`);
-        }
         
-        i += batch.length; // Skip failed batch
+        i += batch.length;
       }
     }
 
+    // Progress logging
     const elapsed = formatDuration(Date.now() - startTime);
     const recordsPerSecond = successCount / ((Date.now() - startTime) / 1000);
     const remainingRecords = totalRecords - i;
     const estimatedRemaining = remainingRecords / Math.max(recordsPerSecond, 1);
     
     log.debug(
-      `[publisher.ts] Stats - Elapsed: ${elapsed} | Speed: ${recordsPerSecond.toFixed(1)} rec/s | Success: ${successCount}/${totalRecords} | Remaining: ~${formatDuration(estimatedRemaining * 1000)}`
+      `Stats - ${elapsed} | ${recordsPerSecond.toFixed(1)} rec/s | ${successCount}/${totalRecords} | ~${formatDuration(estimatedRemaining * 1000)} remaining`
     );
     log.blank();
 
-    // Check again before waiting
+    // Check killswitch again
     if (isImportCancelled()) {
       return handleCancellation(successCount, errorCount, totalRecords);
     }
 
-    // Wait before next batch (except for last batch)
+    // Wait before next batch (proactive pacing)
     if (i < totalRecords) {
-      await new Promise((resolve) => setTimeout(resolve, currentBatchDelay));
+      await new Promise((resolve) => setTimeout(resolve, currentDelay));
     }
   }
 
-  // Mark import as complete
+  // Complete
   if (importState) {
     completeImport(importState);
-    log.debug('Import state saved as completed');
   }
+
+  // Show final performance summary
+  log.blank();
+  log.section('Performance Summary');
+  log.info(calculator.getPerformanceSummary());
+  const totalDuration = (Date.now() - startTime) / 1000;
+  const avgRate = successCount / totalDuration;
+  log.info(`Overall: ${formatLocaleNumber(successCount)} records in ${formatDuration(totalDuration * 1000)} (~${avgRate.toFixed(1)} rec/s)`);
 
   return { successCount, errorCount, cancelled: false };
 }
-
-
 
 /**
  * Handle dry run mode
  */
 function handleDryRun(
   records: PlayRecord[],
-  batchSize: number,
-  batchDelay: number,
-  config: Config,
+  _config: Config,
   syncMode: boolean
 ): PublishResult {
   const totalRecords = records.length;
-
-  // Ensure batch size doesn't exceed applyWrites limit
-  batchSize = Math.min(batchSize, MAX_APPLY_WRITES_OPS);
-
-  // Calculate estimated duration
-  const estimatedBatches = Math.ceil(totalRecords / batchSize);
-  const estimatedDuration = estimatedBatches * batchDelay;
-  
-  // Check if we'll exceed daily limit
-  const recordsPerDay = config.RECORDS_PER_DAY_LIMIT || Number.MAX_SAFE_INTEGER;
-  const needsRateLimiting = totalRecords > recordsPerDay;
-  
-  if (needsRateLimiting) {
-    const estimatedDays = Math.ceil(totalRecords / recordsPerDay);
-    log.warn('⚠️  Large Import Detected');
-    log.warn(`This import exceeds the daily limit of ${formatLocaleNumber(recordsPerDay)} records`);
-    log.warn(`Estimated duration: ${estimatedDays} days with automatic pauses`);
-    log.blank();
-  }
 
   log.section(`DRY RUN MODE ${syncMode ? '(SYNC)' : ''}`);
   if (syncMode) {
     log.info('Sync mode: Only new records will be published');
   }
   log.info(`Total: ${formatLocaleNumber(totalRecords)} records`);
-  log.info(`Batch: ${Math.min(batchSize, MAX_APPLY_WRITES_OPS)} records per call`);
-  
-  if (needsRateLimiting) {
-    const estimatedDays = Math.ceil(totalRecords / recordsPerDay);
-    log.info(`Duration: ${estimatedDays} days with automatic pauses`);
-  } else {
-    log.info(`Time: ~${formatDuration(estimatedDuration)}`);
-  }
+  log.info(`Strategy: Proactive pacing (maintains sustainable rate)`);
+  log.info(`Batch size: Optimized from server capacity after first request`);
+  log.info(`Delay: Calculated to never hit rate limits`);
   log.blank();
 
-  // Show first 5 records as preview
+  // Show preview
   const previewCount = Math.min(5, totalRecords);
   log.info(`Preview (first ${previewCount} records):`);
   log.blank();
@@ -402,20 +406,13 @@ function handleDryRun(
     const artistName = record.artists[0]?.artistName || 'Unknown Artist';
     
     log.raw(`${i + 1}. ${artistName} - ${record.trackName}`);
-    
-    // Album/Release
     if (record.releaseName) {
       log.raw(`   Album: ${record.releaseName}`);
     }
-    
-    // Timestamp
     log.raw(`   Played: ${formatDate(record.playedTime, true)}`);
-    
-    // Source and URL
     log.raw(`   Source: ${record.musicServiceBaseDomain}`);
     log.raw(`   URL: ${record.originUrl}`);
     
-    // MusicBrainz IDs (if available)
     const mbids: string[] = [];
     if (record.artists[0]?.artistMbId) mbids.push(`Artist: ${record.artists[0].artistMbId}`);
     if (record.recordingMbId) mbids.push(`Track: ${record.recordingMbId}`);
@@ -425,10 +422,8 @@ function handleDryRun(
       log.raw(`   MusicBrainz IDs: ${mbids.join(', ')}`);
     }
     
-    // Record metadata
     log.raw(`   Record Type: ${record.$type}`);
     log.raw(`   Client: ${record.submissionClientAgent}`);
-    
     log.blank();
   }
 
@@ -440,6 +435,8 @@ function handleDryRun(
   log.section('DRY RUN COMPLETE');
   log.info('No records were published.');
   log.info('Remove --dry-run to publish for real.');
+  log.info('');
+  log.info('💡 TIP: First batch will probe server capacity, then optimize automatically');
 
   return { successCount: totalRecords, errorCount: 0, cancelled: false };
 }

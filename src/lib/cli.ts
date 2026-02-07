@@ -7,7 +7,7 @@ import { parseLastFmCsv, convertToPlayRecord } from '../lib/csv.js';
 import { parseSpotifyJson, convertSpotifyToPlayRecord } from '../lib/spotify.js';
 import { parseCombinedExports } from '../lib/merge.js';
 import { publishRecordsWithApplyWrites } from './publisher.js';
-import { prompt, confirm } from '../utils/input.js';
+import { prompt, confirm, promptWithValidation, validateFilePath } from '../utils/input.js';
 import { sortRecords } from '../utils/helpers.js';
 import config from '../config.js';
 import { calculateOptimalBatchSize } from '../utils/helpers.js';
@@ -341,44 +341,41 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
     console.log('');
   }
   
-  // Get input files
+  // Get input files with validation
   if (args.mode !== 'deduplicate') {
     if (args.mode === 'combined') {
-      let input = '';
-      while (!input) {
-        input = await prompt('Path to Last.fm CSV file: ');
-        if (!input) {
-          console.log('⚠️  Path is required. Please try again.');
-        }
-      }
-      args.input = input;
+      console.log('\n📁 Input Files');
+      console.log('─'.repeat(50));
       
-      let spotifyInput = '';
-      while (!spotifyInput) {
-        spotifyInput = await prompt('Path to Spotify export (file or directory): ');
-        if (!spotifyInput) {
-          console.log('⚠️  Path is required. Please try again.');
-        }
-      }
-      args['spotify-input'] = spotifyInput;
+      args.input = await promptWithValidation(
+        '📄 Path to Last.fm CSV file: ',
+        (input) => validateFilePath(input, 'csv')
+      );
+      console.log('✓ Last.fm file validated\n');
+      
+      args['spotify-input'] = await promptWithValidation(
+        '📁 Path to Spotify export (file or directory): ',
+        (input) => validateFilePath(input, 'json')
+      );
+      console.log('✓ Spotify file/directory validated');
     } else if (args.mode === 'spotify') {
-      let input = '';
-      while (!input) {
-        input = await prompt('Path to Spotify export (file or directory): ');
-        if (!input) {
-          console.log('⚠️  Path is required. Please try again.');
-        }
-      }
-      args.input = input;
+      console.log('\n📁 Input File');
+      console.log('─'.repeat(50));
+      
+      args.input = await promptWithValidation(
+        '📁 Path to Spotify export (file or directory): ',
+        (input) => validateFilePath(input, 'json')
+      );
+      console.log('✓ File/directory validated');
     } else {
-      let input = '';
-      while (!input) {
-        input = await prompt('Path to Last.fm CSV file: ');
-        if (!input) {
-          console.log('⚠️  Path is required. Please try again.');
-        }
-      }
-      args.input = input;
+      console.log('\n📁 Input File');
+      console.log('─'.repeat(50));
+      
+      args.input = await promptWithValidation(
+        '📄 Path to Last.fm CSV file: ',
+        (input) => validateFilePath(input, 'csv')
+      );
+      console.log('✓ File validated');
     }
     console.log('');
   }

@@ -1,5 +1,95 @@
 import * as readline from 'readline';
 import chalk from 'chalk';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * Validate if a file or directory exists
+ */
+export function fileExists(filepath: string): boolean {
+  try {
+    return fs.existsSync(filepath);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if path is a directory
+ */
+export function isDirectory(filepath: string): boolean {
+  try {
+    return fs.statSync(filepath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate file path and provide helpful feedback
+ */
+export function validateFilePath(filepath: string, fileType: 'csv' | 'json' | 'directory'): { valid: boolean; message?: string } {
+  if (!filepath || filepath.trim() === '') {
+    return { valid: false, message: '⚠️  Path cannot be empty' };
+  }
+
+  const trimmedPath = filepath.trim();
+  
+  if (!fileExists(trimmedPath)) {
+    // Try to provide helpful suggestions
+    const dir = path.dirname(trimmedPath);
+    const base = path.basename(trimmedPath);
+    
+    if (!fileExists(dir)) {
+      return { valid: false, message: `⚠️  Directory does not exist: ${dir}` };
+    }
+    
+    return { valid: false, message: `⚠️  File not found: ${base}\n   Try checking the file name and path` };
+  }
+
+  // Check if it's a directory when we expect a file
+  if (fileType !== 'directory' && isDirectory(trimmedPath)) {
+    return { valid: false, message: `⚠️  Expected a file but got a directory: ${trimmedPath}` };
+  }
+
+  // Check file extension for specific types
+  if (fileType === 'csv' && !trimmedPath.toLowerCase().endsWith('.csv')) {
+    return { valid: false, message: `⚠️  Expected a CSV file, but got: ${path.extname(trimmedPath)}` };
+  }
+
+  if (fileType === 'json' && !isDirectory(trimmedPath) && !trimmedPath.toLowerCase().endsWith('.json')) {
+    return { valid: false, message: `⚠️  Expected a JSON file or directory, but got: ${path.extname(trimmedPath)}` };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Prompt user for input with validation and retry logic
+ */
+export async function promptWithValidation(
+  question: string,
+  validator?: (input: string) => { valid: boolean; message?: string },
+  isPassword = false
+): Promise<string> {
+  while (true) {
+    const input = await prompt(question, isPassword);
+    
+    if (!validator) {
+      return input;
+    }
+    
+    const result = validator(input);
+    if (result.valid) {
+      return input;
+    }
+    
+    if (result.message) {
+      console.log(result.message);
+    }
+    console.log('Please try again.\n');
+  }
+}
 
 /**
  * Strip surrounding quotes from a string (single or double quotes)
