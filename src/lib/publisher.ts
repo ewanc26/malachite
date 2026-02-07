@@ -23,6 +23,16 @@ import {
 const MAX_APPLY_WRITES_OPS = 200;
 
 /**
+ * Minimum batch size to maintain reasonable progress
+ */
+const MIN_BATCH_SIZE = 1;
+
+/**
+ * Maximum batch size (same as MAX_APPLY_WRITES_OPS)
+ */
+const MAX_BATCH_SIZE = 200;
+
+/**
  * Publish records using com.atproto.repo.applyWrites for efficient batching
  * with adaptive rate limiting and stateful resume support
  */
@@ -47,7 +57,7 @@ export async function publishRecordsWithApplyWrites(
     throw new Error('Agent is required for publishing');
   }
 
-  // Start with aggressive settings
+  // Start with conservative settings
   let currentBatchSize = Math.min(batchSize, MAX_APPLY_WRITES_OPS);
   let currentBatchDelay = batchDelay;
   
@@ -56,18 +66,33 @@ export async function publishRecordsWithApplyWrites(
   let consecutiveFailures = 0;
   const MAX_CONSECUTIVE_FAILURES = 3;
   const POINTS_PER_RECORD = 3; // approximate cost per create operation
+  
+  /**
+   * Calculate optimal batch size based on available rate limit points
+   */
+  const calculateOptimalBatchSize = (availablePoints: number): number => {
+    // Calculate how many records we can fit in available points
+    const maxRecordsFromQuota = Math.floor(availablePoints / POINTS_PER_RECORD);
+    
+    // Clamp to our min/max bounds
+    const optimalSize = Math.max(MIN_BATCH_SIZE, Math.min(maxRecordsFromQuota, MAX_BATCH_SIZE));
+    
+    log.debug(`[publisher.ts] calculateOptimalBatchSize: availablePoints=${availablePoints}, maxRecords=${maxRecordsFromQuota}, optimal=${optimalSize}`);
+    return optimalSize;
+  };
 
   // Persistent rate limiter (reads/writes ~/.malachite/state/rate-limit.json)
   // Use headroom threshold instead of safety margin for better rate limit handling
   const rl = new RateLimiter({ headroom: 0.15 }); // Preserve 15% buffer before hitting limit
 
-  log.section('Conservative Adaptive Import');
-  log.info(`Initial batch size: ${currentBatchSize} records (conservative)`);
-  log.info(`Initial delay: ${currentBatchDelay}ms (2 seconds - very safe)`);
+  log.section('Dynamic Adaptive Import');
+  log.info(`Initial batch size: ${currentBatchSize} records`);
+  log.info(`Batch size range: ${MIN_BATCH_SIZE}-${MAX_BATCH_SIZE} records (adjusts based on available quota)`);
+  log.info(`Initial delay: ${currentBatchDelay}ms`);
   log.debug(`[publisher.ts] MAX_APPLY_WRITES_OPS=${MAX_APPLY_WRITES_OPS}, POINTS_PER_RECORD=${POINTS_PER_RECORD}`);
   log.debug(`[publisher.ts] Headroom threshold: 15%, Records per day limit: ${formatLocaleNumber(config.RECORDS_PER_DAY_LIMIT)}`);
-  log.info(`Will automatically adjust based on server response`);
-  log.info(`Using conservative settings to protect your PDS`);
+  log.info(`Batch size will automatically scale based on rate limit quota`);
+  log.info(`Delay will adjust based on server response`);
   log.blank();
   log.info(`Publishing ${formatLocaleNumber(totalRecords)} records using adaptive batching...`);
   log.warn('Press Ctrl+C to stop gracefully after current batch');
@@ -86,18 +111,30 @@ export async function publishRecordsWithApplyWrites(
   }
 
   let i = startIndex;
+  let batchCounter = 0; // Track actual batch number across resume
   while (i < totalRecords) {
     // Check killswitch before processing batch
     if (isImportCancelled()) {
       return handleCancellation(successCount, errorCount, totalRecords);
     }
 
+    // Adjust batch size based on available rate limit quota
+    const safePoints = rl.getSafeAvailablePoints();
+    const optimalSize = calculateOptimalBatchSize(safePoints);
+    
+    // Only adjust if we need to (avoid log spam)
+    if (optimalSize !== currentBatchSize) {
+      const oldSize = currentBatchSize;
+      currentBatchSize = optimalSize;
+      log.info(`📊 Dynamic batch sizing: ${oldSize} → ${currentBatchSize} records (${safePoints} safe points available)`);
+    }
+
     const batch = records.slice(i, Math.min(i + currentBatchSize, totalRecords));
-    const batchNum = Math.floor(i / currentBatchSize) + 1;
+    batchCounter++; // Increment actual batch counter
     const progress = ((i / totalRecords) * 100).toFixed(1);
 
     log.progress(
-      `[${progress}%] Batch ${batchNum} (records ${i + 1}-${Math.min(i + currentBatchSize, totalRecords)}) [size: ${currentBatchSize}, delay: ${currentBatchDelay}ms]`
+      `[${progress}%] Batch ${batchCounter} (records ${i + 1}-${Math.min(i + currentBatchSize, totalRecords)}) [size: ${currentBatchSize}, delay: ${currentBatchDelay}ms]`
     );
     log.debug(`[publisher.ts] Starting batch: index=${i}, size=${batch.length}`);
 
@@ -141,7 +178,8 @@ export async function publishRecordsWithApplyWrites(
         updateImportState(importState, i + batch.length - 1, batchSuccessCount, 0);
       }
 
-      // Speed up if we're doing well (after 5 consecutive successes)
+      // Speed up delay if we're doing well (after 5 consecutive successes)
+      // Note: Batch size is now controlled dynamically by rate limit quota
       if (consecutiveSuccesses >= 5 && currentBatchDelay > config.MIN_BATCH_DELAY) {
         const oldDelay = currentBatchDelay;
         currentBatchDelay = Math.max(
@@ -149,7 +187,7 @@ export async function publishRecordsWithApplyWrites(
           Math.floor(currentBatchDelay * 0.8)
         );
         if (oldDelay !== currentBatchDelay) {
-          log.info(`⚡ Speeding up! Delay: ${oldDelay}ms → ${currentBatchDelay}ms`);
+          log.info(`⚡ Speeding up delay! ${oldDelay}ms → ${currentBatchDelay}ms`);
         }
         consecutiveSuccesses = 0;
       }
@@ -261,11 +299,14 @@ export async function publishRecordsWithApplyWrites(
           updateImportState(importState, i + batch.length - 1, 0, batch.length);
         }
 
-        // If too many consecutive failures, slow down
+        // If too many consecutive failures, slow down delay
+        // Note: Batch size is now controlled dynamically by rate limit quota
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          const oldDelay = currentBatchDelay;
           currentBatchDelay = Math.min(currentBatchDelay * 2, 10000);
-          currentBatchSize = Math.max(Math.floor(currentBatchSize / 2), 10);
-          log.warn(`📉 Multiple failures (${consecutiveFailures}): adjusted to ${currentBatchSize} records, ${currentBatchDelay}ms delay`);
+          if (oldDelay !== currentBatchDelay) {
+            log.warn(`📉 Multiple failures (${consecutiveFailures}): slowing delay to ${currentBatchDelay}ms`);
+          }
           log.debug(`[publisher.ts] Slowing down due to consecutive failures`);
         }
         

@@ -16,7 +16,6 @@ import { Logger, LogLevel, setGlobalLogger, log } from '../utils/logger.js';
 import { registerKillswitch } from '../utils/killswitch.js';
 import { clearCache, clearAllCaches } from '../utils/teal-cache.js';
 import { 
-  saveCredentials, 
   loadCredentials, 
   hasStoredCredentials, 
   clearCredentials,
@@ -335,12 +334,8 @@ async function runInteractiveMode(): Promise<CommandLineArgs> {
       }
       args.password = password;
       
-      // Offer to save credentials
-      const saveCredsAnswer = await confirm('\nSave credentials for future use? (encrypted, machine-specific)', false);
-      if (saveCredsAnswer) {
-        saveCredentials(args.handle, args.password);
-        console.log('✓ Credentials saved securely to ~/.malachite/credentials.json');
-      }
+      // Note: Credentials will be automatically saved after successful login
+      // No need to prompt the user
     }
     
     console.log('');

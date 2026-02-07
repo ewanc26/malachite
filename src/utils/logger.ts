@@ -4,7 +4,7 @@
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { getMalachiteLogsDir } from './platform.js';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -39,7 +39,7 @@ export class Logger {
   enableFileLogging(logDir?: string): void {
     try {
       // Default to ~/.malachite/logs if no directory specified
-      const defaultLogDir = path.join(os.homedir(), '.malachite', 'logs');
+      const defaultLogDir = getMalachiteLogsDir();
       const logsPath = logDir ? path.resolve(process.cwd(), logDir) : defaultLogDir;
       if (!fs.existsSync(logsPath)) {
         fs.mkdirSync(logsPath, { recursive: true });

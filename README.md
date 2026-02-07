@@ -5,13 +5,77 @@ Import your Last.fm and Spotify listening history to the AT Protocol network usi
 **Repository:** [malachite](https://github.com/ewanc26/malachite)  
 [Also available on Tangled](https://tangled.org/did:plc:ofrbh253gwicbkc5nktqepol/atproto-lastfm-importer)
 
+## Table of Contents
+
+- [⚠️ Important: Rate Limits](#️-important-rate-limits)
+  - [📚 Rate Limiting Documentation](#-rate-limiting-documentation)
+  - [How Dynamic Batch Sizing Works](#how-dynamic-batch-sizing-works)
+- [What's with the name?](#whats-with-the-name)
+- [Quick Start](#quick-start)
+  - [Interactive Mode (Recommended for First-Time Users)](#interactive-mode-recommended-for-first-time-users)
+  - [Command Line Mode](#command-line-mode)
+- [Features](#features)
+  - [Import Capabilities](#import-capabilities)
+  - [Performance & Safety](#performance--safety)
+  - [User Experience](#user-experience)
+  - [Technical Features](#technical-features)
+- [Usage Examples](#usage-examples)
+  - [Combined Import (Last.fm + Spotify)](#combined-import-lastfm--spotify)
+  - [Re-Sync Mode](#re-sync-mode)
+  - [Remove Duplicates](#remove-duplicates)
+  - [Import from Spotify](#import-from-spotify)
+  - [Import from Last.fm](#import-from-lastfm)
+  - [Advanced Options](#advanced-options)
+- [Command Line Options](#command-line-options)
+  - [Required Options](#required-options)
+  - [Import Mode](#import-mode)
+  - [Additional Options](#additional-options)
+  - [PDS Override](#pds-override)
+  - [Legacy Flags (Backwards Compatible)](#legacy-flags-backwards-compatible)
+- [Getting Your Data](#getting-your-data)
+  - [Last.fm Export](#lastfm-export)
+  - [Spotify Export](#spotify-export)
+- [Data Format](#data-format)
+  - [Required Fields](#required-fields)
+  - [Optional Fields](#optional-fields)
+  - [Example Records](#example-records)
+- [How It Works](#how-it-works)
+  - [Processing Flow](#processing-flow)
+  - [Automatic Duplicate Prevention](#automatic-duplicate-prevention)
+  - [Rate Limiting Algorithm](#rate-limiting-algorithm)
+  - [Multi-Day Imports](#multi-day-imports)
+- [Logging and Output](#logging-and-output)
+  - [Verbosity Levels](#verbosity-levels)
+- [Error Handling](#error-handling)
+- [Troubleshooting](#troubleshooting)
+  - [Authentication Issues](#authentication-issues)
+  - [Performance Issues](#performance-issues)
+  - [Connection Issues](#connection-issues)
+  - [Output Control](#output-control)
+- [Development](#development)
+- [File Storage](#file-storage)
+  - [Credential Storage](#credential-storage)
+- [Project Structure](#project-structure)
+- [Technical Details](#technical-details)
+  - [Authentication](#authentication)
+  - [Batch Publishing](#batch-publishing)
+  - [Data Mapping](#data-mapping)
+  - [Lexicon Reference](#lexicon-reference)
+- [Contributing](#contributing)
+- [License](#license)
+- [Credits](#credits)
+
 ## ⚠️ Important: Rate Limits
 
 **CRITICAL**: Bluesky's AppView has rate limits on PDS instances. Exceeding 10K records per day can rate limit your **ENTIRE PDS**, affecting all users on your instance.
 
 This importer automatically protects your PDS by:
+- **Dynamic batch sizing** (1-200 records) that adapts to available quota in real-time
+- **15% headroom buffer** prevents quota exhaustion before hitting the limit
 - Limiting imports to **7,500 records per day** (with 75% safety margin)
 - Calculating optimal batch sizes and delays
+- **Graceful degradation** - scales down smoothly as quota depletes
+- **Instant recovery** - immediately returns to maximum speed after quota resets
 - Pausing 24 hours between days for large imports
 - Providing clear progress tracking and time estimates
 - Persisting state across restarts for safe resume
@@ -24,6 +88,26 @@ Malachite has comprehensive rate limiting protection built in.
 ```bash
 npm run check-limits
 ```
+
+### How Dynamic Batch Sizing Works
+
+Malachite continuously monitors your rate limit quota and automatically adjusts batch size:
+
+```
+Fresh Quota (5000 points)    → Batch Size: 200 records (maximum speed)
+Half Depleted (2500 points)  → Batch Size: 200 records (still optimal)
+Approaching Limit (1200)     → Batch Size: 150 records (scaling down)
+Near Headroom (900)          → Batch Size: 50 records (conservative)
+Below Headroom (700)         → Batch Size: 1 record (minimal progress)
+[Quota Resets]               → Batch Size: 200 records (instant recovery)
+```
+
+**Benefits:**
+- ✅ **2x faster** when quota is fresh (200 vs 100 records/batch)
+- ✅ **Never hits rate limits** - proactive scaling with 15% buffer
+- ✅ **Always makes progress** - even with minimal quota (batch size 1)
+- ✅ **Automatic recovery** - no manual intervention needed
+- ✅ **Transparent** - logs all batch size changes with reasons
 
 For more details, see the [Bluesky Rate Limits Documentation](https://docs.bsky.app/blog/rate-limits-pds-v3).
 
@@ -85,8 +169,10 @@ node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 ### Performance & Safety
 - ✅ **Automatic Duplicate Prevention**: Automatically checks Teal and skips records that already exist (no duplicates!)
 - ✅ **Input Deduplication**: Removes duplicate entries within the source file before submission
+- ✅ **Dynamic Batch Sizing**: Automatically adjusts batch size (1-200 records) based on available rate limit quota
 - ✅ **Batch Operations**: Uses `com.atproto.repo.applyWrites` for efficient batch publishing (up to 200 records per call)
-- ✅ **Rate Limiting**: Automatic daily limits prevent PDS rate limiting
+- ✅ **Intelligent Rate Limiting**: Real-time quota monitoring with 15% headroom buffer prevents rate limit exhaustion
+- ✅ **Adaptive Recovery**: Automatically scales back to maximum speed after quota resets
 - ✅ **Multi-Day Imports**: Large imports automatically span multiple days with 24-hour pauses
 - ✅ **Resume Support**: Safe to stop (Ctrl+C) and restart - continues from where it left off
 - ✅ **Graceful Cancellation**: Press Ctrl+C to stop after the current batch completes
@@ -257,7 +343,7 @@ pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y -q
 | `--verbose` | `-v` | Enable debug logging | `false` |
 | `--quiet` | `-q` | Suppress non-essential output | `false` |
 | `--dev` | | Development mode (verbose + file logging + smaller batches) | `false` |
-| `--batch-size <num>` | `-b` | Records per batch (1-200) | Auto-calculated |
+| `--batch-size <num>` | `-b` | Initial batch size (1-200, dynamically adjusted) | Auto-calculated |
 | `--batch-delay <ms>` | `-d` | Delay between batches in ms | `500` (min) |
 | `--help` | | Show help message | - |
 
@@ -454,9 +540,13 @@ Removes duplicates within your source file(s):
 ### Rate Limiting Algorithm
 1. Calculates safe daily limit (75% of 10K = 7,500 records/day by default)
 2. Determines how many days needed for your import
-3. Calculates optimal batch size and delay to spread records evenly
-4. Enforces minimum delay between batches
-5. Shows clear schedule before starting
+3. **Monitors rate limit quota in real-time** before each batch
+4. **Dynamically adjusts batch size** (1-200 records) based on available points
+5. **Preserves 15% headroom buffer** to prevent exhaustion
+6. **Automatically waits** when quota is exhausted (with countdown timer)
+7. **Instantly scales back up** to maximum batch size after quota resets
+8. Enforces minimum delay between batches
+9. Shows clear schedule and real-time batch size adjustments
 
 ### Multi-Day Imports
 
@@ -678,7 +768,9 @@ malachite/
 ### Batch Publishing
 - Uses `com.atproto.repo.applyWrites` for efficiency (up to 20x faster than individual calls)
 - Batches up to 200 records per API call (PDS maximum)
-- Automatically adjusts batch size based on total record count
+- **Dynamic batch sizing** (1-200 records) based on real-time rate limit quota
+- **Intelligent quota monitoring** with 15% headroom buffer
+- **Automatic adjustment** - scales down as quota depletes, scales up after reset
 - Enforces minimum delays between batches for rate limit safety
 
 ### Data Mapping

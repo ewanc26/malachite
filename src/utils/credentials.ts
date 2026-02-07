@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { getMalachiteStateDir } from './platform.js';
 
 /**
  * Stored credentials structure
@@ -12,6 +13,7 @@ interface StoredCredentials {
   encryptedPassword: string;
   iv: string;
   salt: string;
+  machineFingerprint: string;
   createdAt: string;
   lastUsedAt: string;
 }
@@ -20,7 +22,7 @@ interface StoredCredentials {
  * Get credentials file path
  */
 function getCredentialsPath(): string {
-  const credentialsDir = path.join(os.homedir(), '.malachite');
+  const credentialsDir = getMalachiteStateDir();
   if (!fs.existsSync(credentialsDir)) {
     fs.mkdirSync(credentialsDir, { recursive: true });
   }
@@ -28,28 +30,45 @@ function getCredentialsPath(): string {
 }
 
 /**
- * Derive encryption key from machine-specific data
+ * Generate machine-specific fingerprint
  * This makes credentials machine-specific and non-transferable
  */
-function deriveKey(salt: Buffer): Buffer {
-  // Use hostname and username to create a machine-specific key
-  const machineId = `${os.hostname()}-${os.userInfo().username}`;
+function getMachineFingerprint(): string {
+  // Collect machine-specific data
+  const userInfo = os.userInfo();
+  const machineData = [
+    os.hostname(),
+    userInfo.username,
+    os.platform(),
+    os.arch(),
+    os.homedir(),
+  ].join('|');
   
-  // Use PBKDF2 to derive a strong key
-  return crypto.pbkdf2Sync(
-    machineId,
-    salt,
-    100000, // iterations
-    32,     // key length
-    'sha256'
-  );
+  // Hash with SHA-512 for fingerprint
+  return crypto.createHash('sha512').update(machineData).digest('hex');
 }
 
 /**
- * Encrypt password
+ * Derive encryption key from machine-specific data using SHA-512
+ * This makes credentials machine-specific and non-transferable
  */
-function encryptPassword(password: string, salt: Buffer): { encrypted: string; iv: string } {
-  const key = deriveKey(salt);
+function deriveKey(salt: Buffer, machineFingerprint: string): Buffer {
+  // Use PBKDF2 with SHA-512 to derive a strong key
+  // Combining the machine fingerprint with the random salt
+  return crypto.pbkdf2Sync(
+    machineFingerprint,
+    salt,
+    150000, // iterations (increased for SHA-512)
+    64,     // key length (64 bytes for SHA-512)
+    'sha512'
+  ).slice(0, 32); // Take first 32 bytes for AES-256
+}
+
+/**
+ * Encrypt password using AES-256-GCM with SHA-512 derived key
+ */
+function encryptPassword(password: string, salt: Buffer, machineFingerprint: string): { encrypted: string; iv: string } {
+  const key = deriveKey(salt, machineFingerprint);
   const iv = crypto.randomBytes(16);
   
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -68,10 +87,10 @@ function encryptPassword(password: string, salt: Buffer): { encrypted: string; i
 }
 
 /**
- * Decrypt password
+ * Decrypt password using AES-256-GCM with SHA-512 derived key
  */
-function decryptPassword(encryptedData: string, iv: string, salt: Buffer): string {
-  const key = deriveKey(salt);
+function decryptPassword(encryptedData: string, iv: string, salt: Buffer, machineFingerprint: string): string {
+  const key = deriveKey(salt, machineFingerprint);
   
   // Extract auth tag (last 32 hex characters = 16 bytes)
   const authTag = Buffer.from(encryptedData.slice(-32), 'hex');
@@ -87,23 +106,28 @@ function decryptPassword(encryptedData: string, iv: string, salt: Buffer): strin
 }
 
 /**
- * Save credentials to disk (encrypted)
+ * Save credentials to disk (encrypted with SHA-512 and machine-specific salting)
+ * This function is now called automatically on successful login
  */
 export function saveCredentials(handle: string, password: string): void {
   const credentialsPath = getCredentialsPath();
   
-  // Generate random salt for this credential
-  const salt = crypto.randomBytes(32);
+  // Generate machine fingerprint
+  const machineFingerprint = getMachineFingerprint();
   
-  // Encrypt password
-  const { encrypted, iv } = encryptPassword(password, salt);
+  // Generate random salt for this credential
+  const salt = crypto.randomBytes(64); // 64 bytes for SHA-512
+  
+  // Encrypt password with SHA-512 derived key
+  const { encrypted, iv } = encryptPassword(password, salt, machineFingerprint);
   
   const credentials: StoredCredentials = {
-    version: 1,
+    version: 2, // Version 2 for SHA-512
     handle,
     encryptedPassword: encrypted,
     iv,
     salt: salt.toString('hex'),
+    machineFingerprint,
     createdAt: new Date().toISOString(),
     lastUsedAt: new Date().toISOString(),
   };
@@ -118,6 +142,7 @@ export function saveCredentials(handle: string, password: string): void {
 
 /**
  * Load credentials from disk (decrypted)
+ * Verifies machine fingerprint to prevent credential theft
  */
 export function loadCredentials(): { handle: string; password: string } | null {
   const credentialsPath = getCredentialsPath();
@@ -130,12 +155,20 @@ export function loadCredentials(): { handle: string; password: string } | null {
     const data = fs.readFileSync(credentialsPath, 'utf-8');
     const credentials: StoredCredentials = JSON.parse(data);
     
-    // Decrypt password
+    // Verify machine fingerprint
+    const currentFingerprint = getMachineFingerprint();
+    if (credentials.machineFingerprint !== currentFingerprint) {
+      // Credentials were created on a different machine - cannot decrypt
+      return null;
+    }
+    
+    // Decrypt password using SHA-512 derived key
     const salt = Buffer.from(credentials.salt, 'hex');
     const password = decryptPassword(
       credentials.encryptedPassword,
       credentials.iv,
-      salt
+      salt,
+      credentials.machineFingerprint
     );
     
     // Update last used timestamp

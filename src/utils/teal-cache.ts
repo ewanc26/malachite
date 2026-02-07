@@ -1,13 +1,19 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getMalachiteCacheDir } from './platform.js';
 
 /**
  * Cache configuration
  */
 const CACHE_VERSION = 1;
 const CACHE_TTL_HOURS = 24; // Cache validity period
-const CACHE_DIR = join(homedir(), '.malachite', 'cache');
+
+/**
+ * Get cache directory path
+ */
+function getCacheDir(): string {
+  return getMalachiteCacheDir();
+}
 
 /**
  * Cache file structure
@@ -23,8 +29,9 @@ interface CacheFile {
  * Ensure cache directory exists
  */
 function ensureCacheDir(): void {
-  if (!existsSync(CACHE_DIR)) {
-    mkdirSync(CACHE_DIR, { recursive: true });
+  const cacheDir = getCacheDir();
+  if (!existsSync(cacheDir)) {
+    mkdirSync(cacheDir, { recursive: true });
   }
 }
 
@@ -34,7 +41,7 @@ function ensureCacheDir(): void {
 function getCachePath(did: string): string {
   // Sanitize DID for use in filename
   const sanitized = did.replace(/[^a-zA-Z0-9.-]/g, '_');
-  return join(CACHE_DIR, `${sanitized}.json`);
+  return join(getCacheDir(), `${sanitized}.json`);
 }
 
 /**
@@ -153,14 +160,15 @@ export function clearCache(did: string): void {
  * Clear all caches
  */
 export function clearAllCaches(): void {
-  if (!existsSync(CACHE_DIR)) {
+  const cacheDir = getCacheDir();
+  if (!existsSync(cacheDir)) {
     return;
   }
   
-  const files = readdirSync(CACHE_DIR);
+  const files = readdirSync(cacheDir);
   for (const file of files) {
     if (file.endsWith('.json')) {
-      unlinkSync(join(CACHE_DIR, file));
+      unlinkSync(join(cacheDir, file));
     }
   }
 }

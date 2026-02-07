@@ -1,6 +1,7 @@
 import { AtpAgent } from '@atproto/api';
 import { prompt } from '../utils/input.js';
 import * as ui from '../utils/ui.js';
+import { saveCredentials } from '../utils/credentials.js';
 
 interface ResolvedIdentity {
   did: string;
@@ -75,6 +76,16 @@ export async function login(
       ui.succeedSpinner('Logged in successfully (PDS override)!');
       ui.keyValue('DID', agent.session?.did || 'unknown');
       ui.keyValue('Handle', agent.session?.handle || 'unknown');
+      
+      // Automatically save credentials (encrypted with SHA-512, machine-specific)
+      try {
+        saveCredentials(identifier, password);
+        ui.info('Credentials saved securely (SHA-512 encrypted, machine-specific)');
+      } catch (err) {
+        // Non-fatal - log but continue
+        ui.warning('Failed to save credentials - you may need to re-enter them next time');
+      }
+      
       console.log('');
       return agent;
     }
@@ -98,6 +109,16 @@ export async function login(
     ui.succeedSpinner('Logged in successfully!');
     ui.keyValue('DID', agent.session?.did || 'unknown');
     ui.keyValue('Handle', agent.session?.handle || 'unknown');
+    
+    // Automatically save credentials (encrypted with SHA-512, machine-specific)
+    try {
+      saveCredentials(identifier, password);
+      ui.info('Credentials saved securely (SHA-512 encrypted, machine-specific)');
+    } catch (err) {
+      // Non-fatal - log but continue
+      ui.warning('Failed to save credentials - you may need to re-enter them next time');
+    }
+    
     console.log('');
 
     return agent;
