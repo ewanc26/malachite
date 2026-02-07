@@ -88,18 +88,20 @@ export async function publishRecordsWithApplyWrites(
   
   if (serverCapacity) {
     // We have server info - calculate optimal batch size
-    const safePoints = rl.getSafeAvailablePoints();
+    const actualRemaining = rl.getActualRemaining();
     currentBatchSize = pacer.calculateOptimalBatchSize(
       serverCapacity.limit,
       serverCapacity.windowSeconds,
-      safePoints,
+      actualRemaining,
       MAX_PDS_BATCH_SIZE
     );
     
     // Initial delay will be calculated after first batch
     currentDelay = 500;
     
+    const quotaPercent = ((actualRemaining / serverCapacity.limit) * 100).toFixed(1);
     log.info(`ℹ️  Using saved server info: ${serverCapacity.limit} points/${serverCapacity.windowSeconds}s`);
+    log.info(`ℹ️  Current quota: ${actualRemaining}/${serverCapacity.limit} (${quotaPercent}%)`);
     log.info(`ℹ️  Starting with optimal batch: ${currentBatchSize} records`);
     
     // Show estimated time to completion
@@ -107,7 +109,7 @@ export async function publishRecordsWithApplyWrites(
       totalRecords,
       serverCapacity.limit,
       serverCapacity.windowSeconds,
-      safePoints
+      actualRemaining
     );
     log.info(`⏱️  Estimated time: ~${formatDuration(eta * 1000)} at sustainable rate`);
   } else {
@@ -145,17 +147,18 @@ export async function publishRecordsWithApplyWrites(
 
     // Get current server capacity and quota
     const capacity = rl.getServerCapacity();
-    const safePoints = rl.getSafeAvailablePoints();
+    const actualRemaining = rl.getActualRemaining();
     
     if (!capacity) {
       // Still learning - use probe batch
       log.debug('[Publisher] No capacity info yet, using probe batch');
     } else {
-      // Calculate optimal batch size for current quota health
+      // Calculate optimal batch size using ACTUAL remaining (not safe quota)
+      // The pacer will handle low quota by using recovery mode
       const optimalSize = pacer.calculateOptimalBatchSize(
         capacity.limit,
         capacity.windowSeconds,
-        safePoints,
+        actualRemaining,
         MAX_PDS_BATCH_SIZE
       );
       
@@ -234,32 +237,34 @@ export async function publishRecordsWithApplyWrites(
             
             // After first response, recalculate optimal settings
             if (!rl.hasServerInfo() && batchCounter === 1) {
-              const newCap = rl.getServerCapacity();
-              if (newCap) {
-                const safeQuota = rl.getSafeAvailablePoints();
-                const newBatchSize = pacer.calculateOptimalBatchSize(
-                  newCap.limit,
-                  newCap.windowSeconds,
-                  safeQuota,
-                  MAX_PDS_BATCH_SIZE
-                );
-                
-                log.info(`🎓 Learned server capacity! Optimizing for sustainable throughput`);
-                log.info(`   Server: ${newCap.limit} points/${newCap.windowSeconds}s`);
-                log.info(`   Optimal batch: ${newBatchSize} records`);
-                
-                currentBatchSize = newBatchSize;
-                
-                // Show estimated completion time
-                const eta = pacer.estimateTimeToCompletion(
-                  totalRecords - successCount,
-                  newCap.limit,
-                  newCap.windowSeconds,
-                  safeQuota
-                );
+            const newCap = rl.getServerCapacity();
+            if (newCap) {
+            const actualQuota = rl.getActualRemaining();
+            const newBatchSize = pacer.calculateOptimalBatchSize(
+            newCap.limit,
+            newCap.windowSeconds,
+            actualQuota,
+            MAX_PDS_BATCH_SIZE
+            );
+            
+            const quotaPercent = ((actualQuota / newCap.limit) * 100).toFixed(1);
+            log.info(`🎓 Learned server capacity! Optimizing for sustainable throughput`);
+            log.info(`   Server: ${newCap.limit} points/${newCap.windowSeconds}s`);
+            log.info(`   Current quota: ${actualQuota}/${newCap.limit} (${quotaPercent}%)`);
+            log.info(`   Optimal batch: ${newBatchSize} records`);
+            
+            currentBatchSize = newBatchSize;
+            
+            // Show estimated completion time
+            const eta = pacer.estimateTimeToCompletion(
+            totalRecords - successCount,
+            newCap.limit,
+              newCap.windowSeconds,
+              actualQuota
+              );
                 log.info(`   ETA: ~${formatDuration(eta * 1000)}`);
+                }
               }
-            }
           }
         }
       } catch (e) {
@@ -271,12 +276,12 @@ export async function publishRecordsWithApplyWrites(
       // PROACTIVE PACING: Calculate optimal delay for next batch
       const cap = rl.getServerCapacity();
       if (cap && i < totalRecords) {
-        const currentQuota = rl.getSafeAvailablePoints();
+        const actualQuota = rl.getActualRemaining();
         const pacing = pacer.calculateDelay(
           batch.length,
           cap.limit,
           cap.windowSeconds,
-          currentQuota
+          actualQuota
         );
         
         // Update delay if changed significantly
