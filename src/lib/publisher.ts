@@ -117,12 +117,7 @@ export async function publishRecordsWithApplyWrites(
     // server reset if quota is exhausted (persisted across runs).
     const batchPoints = batch.length * POINTS_PER_RECORD;
     log.debug(`[publisher.ts] Reserving quota: batch_size=${batch.length}, points=${batchPoints} (${POINTS_PER_RECORD} per record)`);
-    const permit = await rl.waitForPermit(batchPoints);
-    if (!permit) {
-      const backoffMs = Math.min(currentBatchDelay * 2, 30000);
-      log.warn(`Rate limiter cannot grant permit; backing off ${backoffMs}ms`);
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    }
+    await rl.waitForPermit(batchPoints); // This will automatically wait and retry until permit is granted
 
     try {
       // Call applyWrites with the batch
@@ -207,28 +202,16 @@ export async function publishRecordsWithApplyWrites(
       if (rateLimitError) {
         log.warn('Rate limit hit! Inspecting server headers...');
         
-        // Extract headers from various possible locations in the error object
-        let headers: Record<string, string> = {};
-        
-        // Try different paths where headers might be stored
-        if (err.response?.headers) {
+        // Extract headers from the error response
+        let headers: Record<string, string> | undefined;
+        if (err?.response?.headers) {
           headers = err.response.headers;
           log.debug(`[publisher.ts] Found headers in err.response.headers`);
-        } else if (err.headers) {
+        } else if (err?.headers) {
           headers = err.headers;
           log.debug(`[publisher.ts] Found headers in err.headers`);
-        } else if (err.data?.headers) {
-          headers = err.data.headers;
-          log.debug(`[publisher.ts] Found headers in err.data.headers`);
-        } else {
-          // Log the error structure to help debug
-          log.warn(`[publisher.ts] Could not find headers in error. Error keys: ${JSON.stringify(Object.keys(err))}`);
-          if (err.response) {
-            log.debug(`[publisher.ts] err.response keys: ${JSON.stringify(Object.keys(err.response))}`);
-          }
         }
         
-        // Log what headers we found
         if (headers && Object.keys(headers).length > 0) {
           const normalizedHeaders = normalizeHeaders(headers);
           const headerKeys = Object.keys(normalizedHeaders);
@@ -253,16 +236,11 @@ export async function publishRecordsWithApplyWrites(
           log.warn(`[publisher.ts] No headers found in rate limit error response`);
         }
         
-        // Wait for permit for this batch (this will wait until reset if necessary)
+        // Wait for permit for this batch (this will automatically wait until reset and retry)
         const batchPoints = batch.length * POINTS_PER_RECORD;
         log.debug(`[publisher.ts] Waiting for rate limit reset, requesting ${batchPoints} points...`);
-        const waitOk = await rl.waitForPermit(batchPoints);
-        if (!waitOk) {
-          const backoffMs = Math.min(Math.pow(2, consecutiveFailures) * 1000, 60000);
-          log.info(`Fallback backoff: waiting ${backoffMs}ms before retry...`);
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        }
-        continue;
+        await rl.waitForPermit(batchPoints); // This will loop internally until permit is granted
+        continue; // Retry the same batch
         
       } else {
         // Other error - log and continue
