@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import crypto from 'crypto';
 import type { PlayRecord } from '../types.js';
 import { log } from './logger.js';
+import { getMalachiteStateDir } from './platform.js';
 
 /**
  * Import state for resume functionality
@@ -27,7 +27,7 @@ export interface ImportState {
  * Get the state file path for an import
  */
 export function getStateFilePath(inputFile: string, mode: string): string {
-  const stateDir = path.join(os.homedir(), '.malachite', 'state');
+  const stateDir = path.join(getMalachiteStateDir(), 'state');
   
   // Create state directory if it doesn't exist
   if (!fs.existsSync(stateDir)) {

@@ -302,6 +302,33 @@ export class RateLimiter {
   }
   
   /**
+   * Get safe available points (remaining - headroom buffer)
+   * This is the amount of quota we can safely use without hitting the headroom threshold
+   */
+  getSafeAvailablePoints(): number {
+    const state = this.readState();
+    if (!state) {
+      // No state yet - allow a reasonable default
+      return 300; // Equivalent to 100 records at 3 points each
+    }
+    
+    const now = Math.floor(Date.now() / 1000);
+    
+    // Check if window has reset
+    if (now >= state.resetAt) {
+      log.debug(`[RateLimiter] Window has reset, full quota available: ${state.limit}`);
+      return state.limit;
+    }
+    
+    // Calculate headroom and effective remaining
+    const headroomPoints = Math.floor(state.limit * this.headroomThreshold);
+    const safePoints = Math.max(0, state.remaining - headroomPoints);
+    
+    log.debug(`[RateLimiter] getSafeAvailablePoints: remaining=${state.remaining}, headroom=${headroomPoints}, safe=${safePoints}`);
+    return safePoints;
+  }
+  
+  /**
    * Get current rate limit status for monitoring
    */
   getStatus(): {

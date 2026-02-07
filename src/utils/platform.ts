@@ -20,45 +20,14 @@ export function getPlatform(): Platform {
 }
 
 /**
- * Get the malachite state directory path, respecting platform conventions.
- * Windows: %APPDATA%\malachite (or fallback to ~/.malachite)
- * macOS: ~/Library/Application Support/malachite
- * Linux: ~/.config/malachite (XDG Base Directory spec)
+ * Get the malachite state directory path.
+ * Always uses ~/.malachite regardless of OS platform for consistency.
  */
 export function getMalachiteStateDir(): string {
-  const platform = getPlatform();
   const home = os.homedir();
-  let stateDir: string;
-
-  switch (platform) {
-    case 'windows': {
-      const appdata = process.env.APPDATA;
-      if (appdata) {
-        stateDir = path.join(appdata, 'malachite');
-        log.debug(`[platform.ts] getMalachiteStateDir() using APPDATA on Windows: ${stateDir}`);
-      } else {
-        stateDir = path.join(home, '.malachite');
-        log.debug(`[platform.ts] getMalachiteStateDir() APPDATA not set, falling back to: ${stateDir}`);
-      }
-      return stateDir;
-    }
-    case 'macos': {
-      stateDir = path.join(home, 'Library', 'Application Support', 'malachite');
-      log.debug(`[platform.ts] getMalachiteStateDir() on macOS: ${stateDir}`);
-      return stateDir;
-    }
-    case 'linux': {
-      const xdgConfig = process.env.XDG_CONFIG_HOME;
-      if (xdgConfig) {
-        stateDir = path.join(xdgConfig, 'malachite');
-        log.debug(`[platform.ts] getMalachiteStateDir() using XDG_CONFIG_HOME on Linux: ${stateDir}`);
-      } else {
-        stateDir = path.join(home, '.config', 'malachite');
-        log.debug(`[platform.ts] getMalachiteStateDir() XDG not set, using default on Linux: ${stateDir}`);
-      }
-      return stateDir;
-    }
-  }
+  const stateDir = path.join(home, '.malachite');
+  log.debug(`[platform.ts] getMalachiteStateDir(): ${stateDir}`);
+  return stateDir;
 }
 
 /**
