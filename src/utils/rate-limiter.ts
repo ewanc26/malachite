@@ -405,14 +405,19 @@ export class RateLimiter {
    * ALGORITHM:
    * 1. Read current state
    * 2. Check if window has reset (auto-restore)
-   * 3. Calculate effective remaining (with headroom)
-   * 4. If insufficient: log warning and return false
+   * 3. Check if we have ACTUAL quota for this batch
+   * 4. If below headroom but batch is tiny (<1% of limit), allow it (recovery mode)
    * 5. If sufficient: decrement remaining and save state
+   * 
+   * RECOVERY MODE:
+   * When quota is below headroom threshold, we still allow very small batches
+   * (<1% of limit) to enable gradual recovery via sliding window. This prevents
+   * hard stops when resuming with low quota from external activity.
    * 
    * RETURNS:
    * - true if quota reserved successfully
    * - true if no state yet (first request)
-   * - false if insufficient quota
+   * - false if insufficient actual quota
    * 
    * IMPORTANT: This MODIFIES state by decrementing remaining.
    * Only call this when you're about to make the request.
@@ -439,22 +444,34 @@ export class RateLimiter {
       this.writeState(state);
     }
     
-    // Check quota with headroom
-    const headroomPoints = Math.floor(state.limit * this.headroomThreshold);
-    const effectiveRemaining = state.remaining - headroomPoints;
-    
-    if (effectiveRemaining < pointsNeeded) {
+    // Check if we have ACTUAL quota for this specific batch
+    if (state.remaining < pointsNeeded) {
       const waitTime = state.resetAt - now;
       const percentRemaining = ((state.remaining / state.limit) * 100).toFixed(1);
-      
-      if (state.remaining > 0) {
-        log.warn(`[RateLimiter] ⚠️  Approaching headroom! Need ${pointsNeeded}, have ${state.remaining} (${percentRemaining}%), preserving ${headroomPoints} buffer`);
-      } else {
-        log.warn(`[RateLimiter] ❌ Quota exhausted! Need ${pointsNeeded}, have ${state.remaining}`);
-      }
-      
+      log.warn(`[RateLimiter] ❌ Insufficient quota! Need ${pointsNeeded}, have ${state.remaining} (${percentRemaining}%)`);
       log.warn(`[RateLimiter] ⏳ Must wait ${waitTime}s until ${new Date(state.resetAt * 1000).toISOString()}`);
       return false;
+    }
+    
+    // Check headroom, but allow tiny batches even when below threshold
+    const headroomPoints = Math.floor(state.limit * this.headroomThreshold);
+    const effectiveRemaining = state.remaining - headroomPoints;
+    const percentOfLimit = (pointsNeeded / state.limit) * 100;
+    const quotaPercent = (state.remaining / state.limit) * 100;
+    
+    // If below headroom but batch is tiny (<1% of limit), allow it (recovery mode)
+    if (effectiveRemaining < pointsNeeded) {
+      if (percentOfLimit < 1.0) {
+        // Recovery mode: allow tiny batches even below headroom
+        log.info(`[RateLimiter] 🔄 Recovery mode: Allowing tiny batch (${pointsNeeded} points = ${percentOfLimit.toFixed(2)}% of limit)`);
+        log.debug(`[RateLimiter] Current quota: ${state.remaining}/${state.limit} (${quotaPercent.toFixed(1)}%), below ${headroomPoints} headroom`);
+      } else {
+        // Batch too large for current quota health
+        const waitTime = state.resetAt - now;
+        log.warn(`[RateLimiter] ⚠️  Approaching headroom! Need ${pointsNeeded}, have ${state.remaining} (${quotaPercent.toFixed(1)}%), preserving ${headroomPoints} buffer`);
+        log.warn(`[RateLimiter] ⏳ Must wait ${waitTime}s until ${new Date(state.resetAt * 1000).toISOString()}`);
+        return false;
+      }
     }
     
     // Reserve the quota by decrementing remaining
