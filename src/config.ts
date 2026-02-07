@@ -23,7 +23,7 @@ export const RECORD_TYPE = 'fm.teal.alpha.feed.play';
 export function buildClientAgent(_debug = false) {
   // Always return just the version, regardless of debug mode
   // The debug parameter is kept for backwards compatibility but unused
-  return 'malachite/v0.8.1';
+  return 'malachite/v0.9.0';
 }
 
 // Default batch configuration - conservative for PDS safety
