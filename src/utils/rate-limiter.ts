@@ -399,6 +399,73 @@ export class RateLimiter {
   }
   
   /**
+   * Calculate optimal wait time when in recovery mode.
+   * In a sliding window system, we need to wait for quota to regenerate.
+   * 
+   * ALGORITHM:
+   * 1. Target quota: aim for 50% of limit (comfortable operating level)
+   * 2. Points needed: target - current remaining
+   * 3. Regeneration rate: limit / window_seconds points/second
+   * 4. Wait time: points_needed / regeneration_rate
+   * 5. Cap at 5 minutes max to prevent excessive waits
+   * 
+   * @param state Current rate limit state
+   * @returns Milliseconds to wait for recovery
+   */
+  private calculateRecoveryWaitTime(state: RateLimitState): number {
+    const now = Math.floor(Date.now() / 1000);
+    const timeUntilReset = Math.max(0, state.resetAt - now);
+    
+    // Target: rebuild to 50% of capacity
+    const targetQuota = Math.floor(state.limit * 0.5);
+    const neededQuota = Math.max(0, targetQuota - state.remaining);
+    
+    if (neededQuota === 0) {
+      return 0; // Already at target
+    }
+    
+    // Calculate regeneration rate (points per second)
+    const regenerationRate = state.limit / (state.windowSeconds || 3600);
+    
+    // Time needed to regenerate the required quota
+    const waitSeconds = Math.ceil(neededQuota / regenerationRate);
+    
+    // Cap at 5 minutes or time until reset (whichever is shorter)
+    const maxWaitSeconds = Math.min(300, timeUntilReset);
+    const finalWaitSeconds = Math.min(waitSeconds, maxWaitSeconds);
+    
+    const percentTarget = ((state.remaining + neededQuota) / state.limit * 100).toFixed(1);
+    log.info(`[RateLimiter] 💤 Recovery wait: need ${neededQuota} points to reach ${percentTarget}% (${finalWaitSeconds}s)`);
+    
+    return finalWaitSeconds * 1000; // Convert to milliseconds
+  }
+  
+  /**
+   * Wait for quota to recover in recovery mode.
+   * Called when quota is critically low and we need to pause.
+   * 
+   * @param state Current rate limit state
+   * @returns Promise that resolves after wait completes
+   */
+  private async waitForRecovery(state: RateLimitState): Promise<void> {
+    const waitMs = this.calculateRecoveryWaitTime(state);
+    
+    if (waitMs === 0) {
+      return;
+    }
+    
+    const waitSeconds = Math.floor(waitMs / 1000);
+    const minutes = Math.floor(waitSeconds / 60);
+    const seconds = waitSeconds % 60;
+    
+    log.warn(`[RateLimiter] ⏸️  Recovery mode: Pausing ${minutes}m ${seconds}s to rebuild quota...`);
+    
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+    
+    log.info('[RateLimiter] ✅ Recovery wait complete - resuming with rebuilt quota');
+  }
+  
+  /**
    * Reserve quota points before making a request.
    * Actually decrements the remaining count in state.
    * 
@@ -408,11 +475,12 @@ export class RateLimiter {
    * 3. Check if we have ACTUAL quota for this batch
    * 4. If below headroom but batch is tiny (<1% of limit), allow it (recovery mode)
    * 5. If sufficient: decrement remaining and save state
+   * 6. NEW: If entering recovery mode, wait for quota to rebuild
    * 
    * RECOVERY MODE:
    * When quota is below headroom threshold, we still allow very small batches
-   * (<1% of limit) to enable gradual recovery via sliding window. This prevents
-   * hard stops when resuming with low quota from external activity.
+   * (<1% of limit) to enable gradual recovery via sliding window. However, if
+   * we're in critical recovery (below 15%), we pause to let quota rebuild.
    * 
    * RETURNS:
    * - true if quota reserved successfully
@@ -458,6 +526,30 @@ export class RateLimiter {
     const effectiveRemaining = state.remaining - headroomPoints;
     const percentOfLimit = (pointsNeeded / state.limit) * 100;
     const quotaPercent = (state.remaining / state.limit) * 100;
+    
+    // CRITICAL: If in deep recovery mode (<15% quota), pause before allowing even tiny batches
+    const CRITICAL_THRESHOLD = 0.15;
+    const criticalThresholdPoints = Math.floor(state.limit * CRITICAL_THRESHOLD);
+    
+    if (state.remaining <= criticalThresholdPoints) {
+      // Critical recovery mode: pause to rebuild quota
+      log.warn(`[RateLimiter] 🚨 Critical quota level: ${state.remaining}/${state.limit} (${quotaPercent.toFixed(1)}%) ≤ ${criticalThresholdPoints}`);
+      await this.waitForRecovery(state);
+      
+      // Re-read state after recovery wait
+      const recoveredState = this.readState();
+      if (!recoveredState) {
+        log.error('[RateLimiter] Lost state during recovery wait');
+        return false;
+      }
+      
+      // Update state reference
+      Object.assign(state, recoveredState);
+      
+      // Check if we now have quota after recovery
+      const recoveredQuotaPercent = (state.remaining / state.limit) * 100;
+      log.info(`[RateLimiter] Quota after recovery: ${state.remaining}/${state.limit} (${recoveredQuotaPercent.toFixed(1)}%)`);
+    }
     
     // If below headroom but batch is tiny (<1% of limit), allow it (recovery mode)
     if (effectiveRemaining < pointsNeeded) {
