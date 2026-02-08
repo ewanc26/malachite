@@ -122,6 +122,11 @@ export class ProactiveRatePacer {
    * - 15-30% quota: Conservative 40% of max
    * - <15% quota: RECOVERY MODE - use 10% of max to rebuild quota
    * 
+   * CRITICAL: When quota drops below 15%, the rate limiter will WAIT
+   * for recovery before allowing any records through. During this wait,
+   * NO RECORDS are pushed. This pacer's recovery mode (10% rate) is used
+   * after that wait completes, to gradually rebuild quota health.
+   * 
    * This creates automatic backpressure as quota depletes while
    * still maintaining progress.
    * 
@@ -196,7 +201,9 @@ export class ProactiveRatePacer {
    * STRATEGY:
    * - Calculate sustainable rate
    * - Determine batch size that takes ~30-60 seconds at that rate
-   * - SPECIAL: For very low quota, use tiny batches to allow recovery
+   * - CRITICAL: For very low quota (<15%), return tiny batches (1-5 records)
+   *   NOTE: These tiny batches will only be used AFTER the rate limiter's
+   *   recovery wait completes. During the wait, NO records are pushed.
    * - This provides good balance between:
    *   - Progress (not too small)
    *   - Smoothness (not too large/bursty)
@@ -223,10 +230,13 @@ export class ProactiveRatePacer {
     let targetUtilization = this.TARGET_UTILIZATION;
     
     // CRITICAL: For very low quota (<15%), use RECOVERY MODE
-    // Use tiny batches (1-5 records) with long delays to allow quota to rebuild
+    // Return tiny batches (1-5 records) to be used AFTER rate limiter wait completes
+    // NOTE: The rate limiter will WAIT for quota to rebuild before pushing ANY records
+    // These tiny batches help gradually restore quota health after the wait
     if (quotaHealthPercent < 15) {
       const recoverySize = Math.max(1, Math.min(5, Math.floor(currentRemaining / this.POINTS_PER_RECORD)));
       log.info(`[ProactiveRatePacer] 🔄 Recovery mode (${quotaHealthPercent.toFixed(1)}% quota): ${recoverySize} records/batch`);
+      log.info(`[ProactiveRatePacer] ⏸️  Note: Rate limiter will wait for quota recovery before pushing these`);
       return recoverySize;
     }
     
@@ -303,6 +313,11 @@ export class ProactiveRatePacer {
    * If quota is very low, we may need to wait for some points
    * to recover before starting.
    * 
+   * IMPORTANT: This calculation is informational. The actual waiting
+   * is enforced by RateLimiter.reserveQuota(), which will block and
+   * wait when quota is critically low (<15%). During that wait, NO
+   * RECORDS will be pushed.
+   * 
    * @param pointsNeeded Points we need for next batch
    * @param currentRemaining Current quota
    * @param serverLimit Server capacity  
@@ -329,6 +344,7 @@ export class ProactiveRatePacer {
     const secondsNeeded = pointsToRecover / pointsPerSecond;
     
     log.debug(`[ProactiveRatePacer] Need ${pointsToRecover} points to recover, ETA ${secondsNeeded.toFixed(0)}s`);
+    log.debug(`[ProactiveRatePacer] Note: RateLimiter will enforce this wait - no records pushed during recovery`);
     
     return Math.ceil(secondsNeeded);
   }

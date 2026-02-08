@@ -175,7 +175,8 @@ export class RateLimiter {
    * 2. Determine state file path (~/.malachite/state/rate-limit.json)
    * 3. Ensure state directory exists
    * 4. Check for existing state (from previous runs)
-   * 5. Set hasLearnedFromServer flag if state exists
+   * 5. REBUILD CACHE: Validate and refresh state based on elapsed time
+   * 6. Set hasLearnedFromServer flag if state exists
    * 
    * @param opts Configuration options
    * @param opts.headroom Headroom threshold (0.0-1.0, default 0.15 = 15%)
@@ -193,10 +194,83 @@ export class RateLimiter {
     const state = this.readState();
     if (state && state.limit > 0) {
       this.hasLearnedFromServer = true;
-      log.info(`[RateLimiter] ℹ️  Using saved state: ${state.limit} points/${state.windowSeconds}s window`);
+      log.info(`[RateLimiter] ℹ️  Found saved state: ${state.limit} points/${state.windowSeconds}s window`);
+      
+      // REBUILD CACHE: Refresh state based on time elapsed since last run
+      this.rebuildCacheOnRestart(state);
     } else {
       log.info(`[RateLimiter] 🔍 No saved state - will learn from first server response`);
     }
+  }
+  
+  /**
+   * Rebuild cache on restart by validating and refreshing quota state.
+   * Called during initialization to ensure state reflects any quota regeneration
+   * that occurred while the app was not running.
+   * 
+   * REBUILD LOGIC:
+   * 1. Check if window has fully reset (now >= resetAt)
+   *    - If yes: Restore quota to full capacity
+   * 2. If in sliding window, calculate quota regeneration
+   *    - Points regenerate at: limit / windowSeconds per second
+   *    - Regenerated = (time_elapsed × regeneration_rate)
+   *    - New quota = min(limit, old_remaining + regenerated)
+   * 3. Update resetAt if needed
+   * 4. Save refreshed state to disk
+   * 
+   * This ensures we start with accurate quota on every restart.
+   * 
+   * @param state The loaded state from disk
+   */
+  private rebuildCacheOnRestart(state: RateLimitState): void {
+    const now = Math.floor(Date.now() / 1000);
+    const oldRemaining = state.remaining;
+    
+    // Check if window has completely reset
+    if (now >= state.resetAt) {
+      const timeSinceReset = now - state.resetAt;
+      state.remaining = state.limit;
+      state.resetAt = now + state.windowSeconds;
+      state.updatedAt = now;
+      
+      log.info(`[RateLimiter] 🔄 CACHE REBUILD: Window reset ${timeSinceReset}s ago`);
+      log.info(`[RateLimiter] ✅ Quota restored to full capacity: ${state.limit} points`);
+      this.writeState(state);
+      return;
+    }
+    
+    // Calculate quota regeneration in sliding window
+    const timeElapsed = now - state.updatedAt;
+    
+    if (timeElapsed > 0) {
+      // In a sliding window, points regenerate at the same rate they're consumed
+      const regenerationRate = state.limit / state.windowSeconds; // points per second
+      const regeneratedPoints = Math.floor(timeElapsed * regenerationRate);
+      
+      // New remaining cannot exceed limit
+      const newRemaining = Math.min(state.limit, state.remaining + regeneratedPoints);
+      
+      if (newRemaining > state.remaining) {
+        state.remaining = newRemaining;
+        state.updatedAt = now;
+        
+        const percentNow = (newRemaining / state.limit * 100).toFixed(1);
+        log.info(`[RateLimiter] 🔄 CACHE REBUILD: ${timeElapsed}s elapsed during downtime`);
+        log.info(`[RateLimiter] ✅ Regenerated ${regeneratedPoints} points: ${oldRemaining} → ${newRemaining} (${percentNow}%)`);
+        log.debug(`[RateLimiter] Regeneration rate: ${regenerationRate.toFixed(3)} points/second`);
+        
+        this.writeState(state);
+      } else {
+        log.debug(`[RateLimiter] 🔄 CACHE REBUILD: ${timeElapsed}s elapsed, quota unchanged at ${state.remaining}/${state.limit}`);
+      }
+    } else {
+      log.debug(`[RateLimiter] 🔄 CACHE REBUILD: State is current (updated ${state.updatedAt})`);
+    }
+    
+    // Log current status
+    const percentRemaining = (state.remaining / state.limit * 100).toFixed(1);
+    const timeUntilReset = state.resetAt - now;
+    log.info(`[RateLimiter] 📊 Current quota: ${state.remaining}/${state.limit} (${percentRemaining}%), resets in ${timeUntilReset}s`);
   }
   
   /**
@@ -407,7 +481,7 @@ export class RateLimiter {
    * 2. Points needed: target - current remaining
    * 3. Regeneration rate: limit / window_seconds points/second
    * 4. Wait time: points_needed / regeneration_rate
-   * 5. Cap at 5 minutes max to prevent excessive waits
+   * 5. If wait would exceed time until reset, just wait for reset
    * 
    * @param state Current rate limit state
    * @returns Milliseconds to wait for recovery
@@ -416,7 +490,7 @@ export class RateLimiter {
     const now = Math.floor(Date.now() / 1000);
     const timeUntilReset = Math.max(0, state.resetAt - now);
     
-    // Target: rebuild to 50% of capacity
+    // Target: rebuild to 50% of capacity for healthy operation
     const targetQuota = Math.floor(state.limit * 0.5);
     const neededQuota = Math.max(0, targetQuota - state.remaining);
     
@@ -430,12 +504,11 @@ export class RateLimiter {
     // Time needed to regenerate the required quota
     const waitSeconds = Math.ceil(neededQuota / regenerationRate);
     
-    // Cap at 5 minutes or time until reset (whichever is shorter)
-    const maxWaitSeconds = Math.min(300, timeUntilReset);
-    const finalWaitSeconds = Math.min(waitSeconds, maxWaitSeconds);
+    // If calculated wait is longer than reset, just wait for reset
+    const finalWaitSeconds = Math.min(waitSeconds, timeUntilReset);
     
     const percentTarget = ((state.remaining + neededQuota) / state.limit * 100).toFixed(1);
-    log.info(`[RateLimiter] 💤 Recovery wait: need ${neededQuota} points to reach ${percentTarget}% (${finalWaitSeconds}s)`);
+    log.info(`[RateLimiter] 💤 Recovery calculation: need ${neededQuota} points to reach ${percentTarget}% (${finalWaitSeconds}s)`);
     
     return finalWaitSeconds * 1000; // Convert to milliseconds
   }
@@ -443,6 +516,7 @@ export class RateLimiter {
   /**
    * Wait for quota to recover in recovery mode.
    * Called when quota is critically low and we need to pause.
+   * NO RECORDS WILL BE PUSHED during this wait period.
    * 
    * @param state Current rate limit state
    * @returns Promise that resolves after wait completes
@@ -458,11 +532,12 @@ export class RateLimiter {
     const minutes = Math.floor(waitSeconds / 60);
     const seconds = waitSeconds % 60;
     
-    log.warn(`[RateLimiter] ⏸️  Recovery mode: Pausing ${minutes}m ${seconds}s to rebuild quota...`);
+    log.warn(`[RateLimiter] ⏸️  RECOVERY MODE: Pausing ${minutes}m ${seconds}s to rebuild quota`);
+    log.warn(`[RateLimiter] 🚫 NO RECORDS will be pushed during this wait period`);
     
     await new Promise(resolve => setTimeout(resolve, waitMs));
     
-    log.info('[RateLimiter] ✅ Recovery wait complete - resuming with rebuilt quota');
+    log.info('[RateLimiter] ✅ Recovery wait complete - verifying quota before resuming');
   }
   
   /**
@@ -472,15 +547,15 @@ export class RateLimiter {
    * ALGORITHM:
    * 1. Read current state
    * 2. Check if window has reset (auto-restore)
-   * 3. Check if we have ACTUAL quota for this batch
-   * 4. If below headroom but batch is tiny (<1% of limit), allow it (recovery mode)
-   * 5. If sufficient: decrement remaining and save state
-   * 6. NEW: If entering recovery mode, wait for quota to rebuild
+   * 3. If quota is critically low (<15%), WAIT for recovery - NO RECORDS pushed
+   * 4. After recovery, verify we have sufficient quota
+   * 5. Check if we have ACTUAL quota for this batch
+   * 6. If sufficient: decrement remaining and save state
    * 
-   * RECOVERY MODE:
-   * When quota is below headroom threshold, we still allow very small batches
-   * (<1% of limit) to enable gradual recovery via sliding window. However, if
-   * we're in critical recovery (below 15%), we pause to let quota rebuild.
+   * CRITICAL CHANGE:
+   * When quota drops below 15%, we MUST WAIT for recovery.
+   * NO tiny batches are allowed during this time.
+   * This ensures we never exhaust quota completely.
    * 
    * RETURNS:
    * - true if quota reserved successfully
@@ -512,28 +587,16 @@ export class RateLimiter {
       this.writeState(state);
     }
     
-    // Check if we have ACTUAL quota for this specific batch
-    if (state.remaining < pointsNeeded) {
-      const waitTime = state.resetAt - now;
-      const percentRemaining = ((state.remaining / state.limit) * 100).toFixed(1);
-      log.warn(`[RateLimiter] ❌ Insufficient quota! Need ${pointsNeeded}, have ${state.remaining} (${percentRemaining}%)`);
-      log.warn(`[RateLimiter] ⏳ Must wait ${waitTime}s until ${new Date(state.resetAt * 1000).toISOString()}`);
-      return false;
-    }
-    
-    // Check headroom, but allow tiny batches even when below threshold
-    const headroomPoints = Math.floor(state.limit * this.headroomThreshold);
-    const effectiveRemaining = state.remaining - headroomPoints;
-    const percentOfLimit = (pointsNeeded / state.limit) * 100;
-    const quotaPercent = (state.remaining / state.limit) * 100;
-    
-    // CRITICAL: If in deep recovery mode (<15% quota), pause before allowing even tiny batches
+    // CRITICAL: Check if quota is critically low - if so, WAIT (no records pushed)
     const CRITICAL_THRESHOLD = 0.15;
     const criticalThresholdPoints = Math.floor(state.limit * CRITICAL_THRESHOLD);
+    const quotaPercent = (state.remaining / state.limit) * 100;
     
     if (state.remaining <= criticalThresholdPoints) {
-      // Critical recovery mode: pause to rebuild quota
+      // Critical recovery mode: MUST WAIT - no records pushed during this time
       log.warn(`[RateLimiter] 🚨 Critical quota level: ${state.remaining}/${state.limit} (${quotaPercent.toFixed(1)}%) ≤ ${criticalThresholdPoints}`);
+      log.warn(`[RateLimiter] 🚫 Entering recovery mode - NO RECORDS will be pushed until quota rebuilds`);
+      
       await this.waitForRecovery(state);
       
       // Re-read state after recovery wait
@@ -546,24 +609,34 @@ export class RateLimiter {
       // Update state reference
       Object.assign(state, recoveredState);
       
-      // Check if we now have quota after recovery
       const recoveredQuotaPercent = (state.remaining / state.limit) * 100;
-      log.info(`[RateLimiter] Quota after recovery: ${state.remaining}/${state.limit} (${recoveredQuotaPercent.toFixed(1)}%)`);
-    }
-    
-    // If below headroom but batch is tiny (<1% of limit), allow it (recovery mode)
-    if (effectiveRemaining < pointsNeeded) {
-      if (percentOfLimit < 1.0) {
-        // Recovery mode: allow tiny batches even below headroom
-        log.info(`[RateLimiter] 🔄 Recovery mode: Allowing tiny batch (${pointsNeeded} points = ${percentOfLimit.toFixed(2)}% of limit)`);
-        log.debug(`[RateLimiter] Current quota: ${state.remaining}/${state.limit} (${quotaPercent.toFixed(1)}%), below ${headroomPoints} headroom`);
-      } else {
-        // Batch too large for current quota health
-        const waitTime = state.resetAt - now;
-        log.warn(`[RateLimiter] ⚠️  Approaching headroom! Need ${pointsNeeded}, have ${state.remaining} (${quotaPercent.toFixed(1)}%), preserving ${headroomPoints} buffer`);
-        log.warn(`[RateLimiter] ⏳ Must wait ${waitTime}s until ${new Date(state.resetAt * 1000).toISOString()}`);
+      log.info(`[RateLimiter] ✅ Quota after recovery: ${state.remaining}/${state.limit} (${recoveredQuotaPercent.toFixed(1)}%)`);
+      
+      // Verify we actually have enough quota now
+      if (state.remaining < pointsNeeded) {
+        log.warn(`[RateLimiter] ⚠️  Still insufficient quota after recovery: need ${pointsNeeded}, have ${state.remaining}`);
         return false;
       }
+    }
+    
+    // Check if we have ACTUAL quota for this specific batch
+    if (state.remaining < pointsNeeded) {
+      const waitTime = state.resetAt - now;
+      const percentRemaining = ((state.remaining / state.limit) * 100).toFixed(1);
+      log.warn(`[RateLimiter] ❌ Insufficient quota! Need ${pointsNeeded}, have ${state.remaining} (${percentRemaining}%)`);
+      log.warn(`[RateLimiter] ⏳ Must wait ${waitTime}s until ${new Date(state.resetAt * 1000).toISOString()}`);
+      return false;
+    }
+    
+    // Check headroom buffer
+    const headroomPoints = Math.floor(state.limit * this.headroomThreshold);
+    const effectiveRemaining = state.remaining - headroomPoints;
+    
+    if (effectiveRemaining < pointsNeeded) {
+      // Below headroom - deny to preserve buffer
+      log.warn(`[RateLimiter] ⚠️  Below headroom threshold! Need ${pointsNeeded}, have ${state.remaining} (${quotaPercent.toFixed(1)}%), preserving ${headroomPoints} buffer`);
+      log.warn(`[RateLimiter] ⏳ Waiting for quota to rebuild...`);
+      return false;
     }
     
     // Reserve the quota by decrementing remaining
@@ -571,7 +644,7 @@ export class RateLimiter {
     state.updatedAt = now;
     this.writeState(state);
     
-    log.debug(`[RateLimiter] Reserved ${pointsNeeded} points, ${state.remaining} remaining`);
+    log.debug(`[RateLimiter] ✅ Reserved ${pointsNeeded} points, ${state.remaining} remaining`);
     return true;
   }
   
