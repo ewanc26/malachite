@@ -150,20 +150,27 @@ export class ProactiveRatePacer {
     const quotaHealthPercent = (currentRemaining / serverLimit) * 100;
     
     // Adjust target utilization based on quota health
+    // OPTIMIZED: Progressive throttling - maintains progress even at critical levels
     let targetUtilization = this.TARGET_UTILIZATION;
     let reason = `Target rate: ${(targetUtilization * 100).toFixed(0)}% of maximum`;
     
-    // CRITICAL: Recovery mode for very low quota
-    // Use only 10% of max rate to allow quota to rebuild via sliding window
-    if (quotaHealthPercent < 15) {
+    // PROGRESSIVE THROTTLING: Gradual slowdown instead of hard stop
+    // This maintains progress while allowing quota to rebuild
+    if (quotaHealthPercent < 5) {
+      // Critical: barely maintain progress (5% rate)
+      // This is the absolute minimum to avoid complete stop
+      targetUtilization = 0.05;
+      reason = `Critical (${quotaHealthPercent.toFixed(1)}% quota): 5% rate, allowing rebuild`;
+    } else if (quotaHealthPercent < 15) {
+      // Very Low: use 10% rate to gradually rebuild
       targetUtilization = 0.10;
-      reason = `Recovery mode (${quotaHealthPercent.toFixed(1)}% quota): 10% rate to rebuild`;
+      reason = `Very low (${quotaHealthPercent.toFixed(1)}% quota): 10% rate to rebuild`;
     } else if (quotaHealthPercent < 30) {
-      // Low quota: be very conservative
+      // Low quota: be conservative at 40%
       targetUtilization = 0.40;
       reason = `Low quota (${quotaHealthPercent.toFixed(0)}%): conservative 40% rate`;
     } else if (quotaHealthPercent < 60) {
-      // Medium quota: moderate slowdown
+      // Medium quota: moderate 60% rate
       targetUtilization = 0.60;
       reason = `Medium quota (${quotaHealthPercent.toFixed(0)}%): moderate 60% rate`;
     }
@@ -229,20 +236,25 @@ export class ProactiveRatePacer {
     const quotaHealthPercent = (currentRemaining / serverLimit) * 100;
     let targetUtilization = this.TARGET_UTILIZATION;
     
-    // CRITICAL: For very low quota (<15%), use RECOVERY MODE
-    // Return tiny batches (1-5 records) to be used AFTER rate limiter wait completes
-    // NOTE: The rate limiter will WAIT for quota to rebuild before pushing ANY records
-    // These tiny batches help gradually restore quota health after the wait
-    if (quotaHealthPercent < 15) {
-      const recoverySize = Math.max(1, Math.min(5, Math.floor(currentRemaining / this.POINTS_PER_RECORD)));
-      log.info(`[ProactiveRatePacer] 🔄 Recovery mode (${quotaHealthPercent.toFixed(1)}% quota): ${recoverySize} records/batch`);
-      log.info(`[ProactiveRatePacer] ⏸️  Note: Rate limiter will wait for quota recovery before pushing these`);
-      return recoverySize;
-    }
-    
-    if (quotaHealthPercent < 30) {
+    // OPTIMIZED: Progressive throttling for batch size calculation
+    // Aligns with the delay calculation for consistent behavior
+    if (quotaHealthPercent < 5) {
+      // Critical: tiny batches (1-10 records) to maintain minimal progress
+      targetUtilization = 0.05;
+      const criticalSize = Math.max(1, Math.min(10, Math.floor(currentRemaining / this.POINTS_PER_RECORD)));
+      log.info(`[ProactiveRatePacer] ⚠️ Critical (${quotaHealthPercent.toFixed(1)}% quota): ${criticalSize} records/batch`);
+      return criticalSize;
+    } else if (quotaHealthPercent < 15) {
+      // Very Low: small batches (10-20 records) to gradually rebuild
+      targetUtilization = 0.10;
+      const lowSize = Math.max(10, Math.min(20, Math.floor(currentRemaining / this.POINTS_PER_RECORD)));
+      log.debug(`[ProactiveRatePacer] Very low quota: ${lowSize} records/batch`);
+      return lowSize;
+    } else if (quotaHealthPercent < 30) {
+      // Low: conservative batches
       targetUtilization = 0.40;
     } else if (quotaHealthPercent < 60) {
+      // Medium: moderate batches
       targetUtilization = 0.60;
     }
     

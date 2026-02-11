@@ -113,11 +113,14 @@ export async function publishRecordsWithApplyWrites(
     );
     log.info(`⏱️  Estimated time: ~${formatDuration(eta * 1000)} at sustainable rate`);
   } else {
-    // No previous info - start with probe
-    currentBatchSize = 10;
+    // OPTIMIZED: Smart probe - 50 records (150 points) is safe for all standard rate limits
+    // Previous: 10 records was too conservative, causing slow first imports
+    // Minimum server: 1000 points/hour → 150 points is only 15% → Very safe
+    currentBatchSize = 50;
     currentDelay = 500;
-    log.info(`🔍 No server info yet - starting with probe: ${currentBatchSize} records`);
-    log.info(`ℹ️  Will calculate optimal pacing after learning capacity`);
+    log.info(`🔍 Smart probe: ${currentBatchSize} records (150 points)`);
+    log.info(`ℹ️  Safe for all standard rate limits (min 1000 points/hour)`);
+    log.info(`ℹ️  Will optimize after learning server capacity`);
   }
   
   log.blank();
