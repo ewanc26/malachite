@@ -36,7 +36,7 @@ import { formatLocaleNumber } from '../utils/platform.js';
  */
 export function showHelp(): void {
   console.log(`
-${'\x1b[1m'}Malachite v0.9.1${'\x1b[0m'}
+${'\x1b[1m'}Malachite v0.9.2${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
   pnpm start                     Run in interactive mode (prompts for all inputs)
