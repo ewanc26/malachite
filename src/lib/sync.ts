@@ -68,11 +68,11 @@ export async function fetchExistingRecords(
   let totalFetched = 0;
   const startTime = Date.now();
 
-  // Adaptive batch sizing
-  let batchSize = 25; // Start conservative
+  // Adaptive batch sizing - OPTIMIZED for speed
+  let batchSize = 50; // Start with proven safe size (was 25)
   let consecutiveFastRequests = 0;
   let consecutiveSlowRequests = 0;
-  const TARGET_LATENCY_MS = 2000; // Target 2s per request
+  const TARGET_LATENCY_MS = 1500; // Target 1.5s per request (was 2s)
   const MIN_BATCH_SIZE = 10;
   const MAX_BATCH_SIZE = 100; // AT Protocol maximum
   let requestCount = 0;
@@ -126,11 +126,12 @@ export async function fetchExistingRecords(
         consecutiveFastRequests++;
         consecutiveSlowRequests = 0;
 
-        if (consecutiveFastRequests >= 3 && batchSize < MAX_BATCH_SIZE) {
+        // OPTIMIZED: Scale up faster (2 requests instead of 3, 2x instead of 1.5x)
+        if (consecutiveFastRequests >= 2 && batchSize < MAX_BATCH_SIZE) {
           const oldSize = batchSize;
-          batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 1.5));
+          batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 2.0)); // Doubled scaling factor
           if (oldSize !== batchSize) {
-            log.info(`⚡ Network performing well - increased batch size: ${oldSize} → ${batchSize}`);
+            log.info(`⚡ Fast network - doubled batch size: ${oldSize} → ${batchSize}`);
           }
           consecutiveFastRequests = 0;
         }
@@ -191,11 +192,11 @@ export async function fetchAllRecords(
   let totalFetched = 0;
   const startTime = Date.now();
 
-  // Adaptive batch sizing
-  let batchSize = 25; // Start conservative
+  // Adaptive batch sizing - OPTIMIZED for speed
+  let batchSize = 50; // Start with proven safe size (was 25)
   let consecutiveFastRequests = 0;
   let consecutiveSlowRequests = 0;
-  const TARGET_LATENCY_MS = 2000; // Target 2s per request
+  const TARGET_LATENCY_MS = 1500; // Target 1.5s per request (was 2s)
   const MIN_BATCH_SIZE = 10;
   const MAX_BATCH_SIZE = 100; // AT Protocol maximum
   let requestCount = 0;
@@ -239,10 +240,11 @@ export async function fetchAllRecords(
         consecutiveFastRequests++;
         consecutiveSlowRequests = 0;
 
-        if (consecutiveFastRequests >= 3 && batchSize < MAX_BATCH_SIZE) {
-          batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 1.5));
+        // OPTIMIZED: Scale up faster (2 requests instead of 3, 2x instead of 1.5x)
+        if (consecutiveFastRequests >= 2 && batchSize < MAX_BATCH_SIZE) {
+        batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 2.0)); // Doubled scaling factor
           consecutiveFastRequests = 0;
-        }
+      }
       } else {
         // Request was slow - decrease batch size
         consecutiveSlowRequests++;
