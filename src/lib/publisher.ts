@@ -15,6 +15,7 @@ import {
   completeImport,
   getResumeStartIndex,
 } from '../utils/import-state.js';
+import { retryWithBackoff, isRetryableError } from '../utils/network/retry-helper.js';
 
 /**
  * Maximum operations allowed per applyWrites call (PDS hard limit)
@@ -205,11 +206,37 @@ export async function publishRecordsWithApplyWrites(
     await rl.waitForPermit(batchPoints);
 
     try {
-      // Send batch
-      const response = await agent.com.atproto.repo.applyWrites({
-        repo: agent.session?.did || '',
-        writes: writes as any,
-      });
+      // Send batch with retry logic for transient failures
+      const response = await retryWithBackoff(
+        async () => {
+          return await agent.com.atproto.repo.applyWrites({
+            repo: agent.session?.did || '',
+            writes: writes as any,
+          });
+        },
+        {
+          maxAttempts: 3,
+          initialDelayMs: 1000,
+          backoffMultiplier: 2,
+          retryableErrors: [
+            'fetch failed',
+            'ECONNRESET',
+            'ETIMEDOUT',
+            'ENOTFOUND',
+            'ECONNREFUSED',
+            'network',
+            'socket hang up',
+            'timeout',
+            '503',
+            '502',
+            '504',
+          ],
+          onRetry: (attempt, maxAttempts, delay, error) => {
+            log.warn(`⚠️  Batch ${batchCounter} failed (attempt ${attempt}/${maxAttempts}): ${error.message}`);
+            log.info(`⏳ Retrying in ${(delay / 1000).toFixed(1)}s...`);
+          },
+        }
+      );
 
       // Success!
       const batchSuccessCount = response.data.results?.length || batch.length;
@@ -327,15 +354,25 @@ export async function publishRecordsWithApplyWrites(
         continue;
         
       } else {
-        // Other error - log and skip batch
+        // Non-retryable error (already retried by retryWithBackoff)
         errorCount += batch.length;
-        log.error(`Batch failed: ${err.message}`);
         
-        batch.slice(0, 3).forEach((record) => {
-          log.debug(`Failed: ${record.trackName} by ${record.artists[0]?.artistName}`);
+        // Determine if this was a retryable error that exhausted retries
+        const wasRetryable = isRetryableError(err, ['fetch failed']);
+        
+        if (wasRetryable) {
+          log.error(`❌ Batch ${batchCounter} failed after 3 retry attempts: ${err.message}`);
+        } else {
+          log.error(`❌ Batch ${batchCounter} failed (non-retryable): ${err.message}`);
+        }
+        
+        // Show sample of failed records
+        const sampleSize = Math.min(3, batch.length);
+        batch.slice(0, sampleSize).forEach((record) => {
+          log.debug(`   Failed: ${record.trackName} by ${record.artists[0]?.artistName}`);
         });
-        if (batch.length > 3) {
-          log.debug(`... and ${batch.length - 3} more failed`);
+        if (batch.length > sampleSize) {
+          log.debug(`   ... and ${batch.length - sampleSize} more records failed`);
         }
 
         if (importState) {
