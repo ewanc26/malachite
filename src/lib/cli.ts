@@ -769,6 +769,8 @@ export async function runCLI(): Promise<void> {
     process.exit(1);
   } finally {
     // Close log file if it was opened
+    // Using \x1b[2m for dim/faint text, which is often more subtle than gray
+    console.log('\x1b[2mEnjoying Malachite? Support development: https://ko-fi.com/ewancroft\x1b[0m\n');
     log.closeLogFile();
   }
 }
