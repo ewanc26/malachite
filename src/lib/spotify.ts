@@ -27,8 +27,27 @@ export interface SpotifyRecord {
   incognito_mode: boolean;
 }
 
+// ─── web: boolean toggle ────────────────────────────────────────────────────
+//  parseSpotifyJsonContent accepts an already-decoded SpotifyRecord[] so the
+//  web app can call it after reading files via FileReader.
+//  parseSpotifyJson remains as the Node CLI wrapper.
+// ────────────────────────────────────────────────────────────────────────────
+
 /**
- * Parse Spotify JSON export
+ * Filter and validate an array of already-parsed Spotify records.
+ * Browser-safe — no fs dependency.
+ */
+export function parseSpotifyJsonContent(records: SpotifyRecord[]): SpotifyRecord[] {
+  const trackRecords = records.filter(r =>
+    r.master_metadata_track_name &&
+    r.master_metadata_album_artist_name
+  );
+  console.log(`✓ Parsed ${trackRecords.length} track records (filtered ${records.length - trackRecords.length} non-music records)\n`);
+  return trackRecords;
+}
+
+/**
+ * Parse Spotify JSON export — Node CLI wrapper
  * Supports both single files and directories with multiple JSON files
  */
 export function parseSpotifyJson(filePathOrDir: string): SpotifyRecord[] {
@@ -57,14 +76,8 @@ export function parseSpotifyJson(filePathOrDir: string): SpotifyRecord[] {
     allRecords = JSON.parse(fileContent) as SpotifyRecord[];
   }
   
-  // Filter out records without track names (podcasts, audiobooks, etc.)
-  const trackRecords = allRecords.filter(r => 
-    r.master_metadata_track_name && 
-    r.master_metadata_album_artist_name
-  );
-  
-  console.log(`✓ Parsed ${trackRecords.length} track records (filtered ${allRecords.length - trackRecords.length} non-music records)\n`);
-  return trackRecords;
+  // Delegate to the shared browser-safe content parser.
+  return parseSpotifyJsonContent(allRecords);
 }
 
 /**
