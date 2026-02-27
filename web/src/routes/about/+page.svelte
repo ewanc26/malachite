@@ -48,6 +48,83 @@
     </p>
   </section>
 
+  <!-- ── CLI / Local usage ───────────────────────────────────────────────────── -->
+  <section>
+    <h2>CLI / Local usage</h2>
+    <p>
+      Malachite also ships as a Node.js command-line tool. This is useful if you prefer to
+      run imports locally, need full control over batch settings, or want to automate things
+      with scripts.
+    </p>
+
+    <h3>Prerequisites</h3>
+    <ul>
+      <li><a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a> v18 or later</li>
+      <li><a href="https://pnpm.io" target="_blank" rel="noopener">pnpm</a> (recommended) — or npm / yarn</li>
+    </ul>
+
+    <h3>Install &amp; build</h3>
+    <div class="code-block">
+      <pre><code># Clone the repository
+git clone https://github.com/ewanc26/malachite.git
+cd malachite
+
+# Install dependencies
+pnpm install
+
+# Build
+pnpm build</code></pre>
+    </div>
+
+    <h3>Interactive mode</h3>
+    <p>Run without arguments and Malachite will walk you through everything:</p>
+    <div class="code-block">
+      <pre><code>pnpm start</code></pre>
+    </div>
+
+    <h3>Command-line mode</h3>
+    <p>Common invocations:</p>
+    <div class="code-block">
+      <pre><code># Import from Last.fm CSV
+pnpm start -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+
+# Import from Spotify JSON export
+pnpm start -i spotify-export/ -m spotify -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+
+# Merge both sources
+pnpm start -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+
+# Sync (skip already-imported records)
+pnpm start -i lastfm.csv -m sync -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
+
+# Remove duplicates from your Teal feed
+pnpm start -m deduplicate -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx
+
+# Preview without publishing
+pnpm start -i lastfm.csv --dry-run</code></pre>
+    </div>
+
+    <h3>Key flags</h3>
+    <div class="flag-table">
+      <div class="flag-row flag-row--header">
+        <span>Flag</span><span>Description</span>
+      </div>
+      <div class="flag-row"><code>-i &lt;path&gt;</code><span>Input file or directory</span></div>
+      <div class="flag-row"><code>-h &lt;handle&gt;</code><span>ATProto handle or DID</span></div>
+      <div class="flag-row"><code>-p &lt;password&gt;</code><span>App password (not your main password)</span></div>
+      <div class="flag-row"><code>-m &lt;mode&gt;</code><span><code>lastfm</code> · <code>spotify</code> · <code>combined</code> · <code>sync</code> · <code>deduplicate</code></span></div>
+      <div class="flag-row"><code>-y</code><span>Skip confirmation prompts</span></div>
+      <div class="flag-row"><code>--dry-run</code><span>Preview without writing records</span></div>
+      <div class="flag-row"><code>-v</code><span>Verbose / debug output</span></div>
+      <div class="flag-row"><code>-q</code><span>Quiet mode (warnings &amp; errors only)</span></div>
+    </div>
+
+    <p>
+      Full documentation is available at
+      <a href="https://docs.ewancroft.uk/projects/malachite" target="_blank" rel="noopener">docs.ewancroft.uk/projects/malachite</a>.
+    </p>
+  </section>
+
   <!-- ── Rate limits ────────────────────────────────────────────────────────── -->
   <section>
     <h2>Rate limits &amp; PDS safety</h2>
@@ -229,6 +306,66 @@
     padding: 0.1em 0.35em;
     border-radius: 3px;
   }
+
+  /* ── Code blocks ──────────────────────────────────────────────────────────── */
+  .code-block {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0 0 1rem;
+  }
+
+  .code-block pre {
+    margin: 0;
+    padding: 1rem 1.25rem;
+  }
+
+  .code-block code {
+    background: none;
+    padding: 0;
+    font-size: 0.8rem;
+    color: var(--text);
+    line-height: 1.7;
+  }
+
+  /* ── Flag table ──────────────────────────────────────────────────────────── */
+  .flag-table {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 0 0 1rem;
+    font-size: 0.85rem;
+  }
+
+  .flag-row {
+    display: grid;
+    grid-template-columns: 10rem 1fr;
+    gap: 1rem;
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+
+  .flag-row:last-child { border-bottom: none; }
+
+  .flag-row--header {
+    background: var(--surface-2);
+    font-size: 0.72rem;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  .flag-row code {
+    background: none;
+    padding: 0;
+    color: var(--accent);
+    font-size: 0.82em;
+  }
+
+  .flag-row span { color: var(--muted); }
 
   /* ── Pills ──────────────────────────────────────────────────────────────── */
   .card {
