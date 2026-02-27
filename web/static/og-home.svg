@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <pattern id="dots" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#1f3328" />
+    </pattern>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18" result="blur" />
+      <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+    </filter>
+    <radialGradient id="glowGrad" cx="72%" cy="50%" r="42%">
+      <stop offset="0%" stop-color="#3fb968" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#090f0c" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#090f0c" />
+  <rect width="1200" height="630" fill="url(#dots)" />
+  <rect width="1200" height="630" fill="url(#glowGrad)" />
+
+  <!-- Left accent bar -->
+  <rect x="72" y="180" width="3" height="270" rx="2" fill="#3fb968" opacity="0.7" />
+
+  <!-- Eyebrow -->
+  <text x="96" y="212" font-family="JetBrains Mono" font-size="18" fill="#6b9e7e" letter-spacing="3">MALACHITE</text>
+
+  <!-- Headline -->
+  <text x="96" y="300" font-family="Inter" font-size="72" font-weight="700" fill="#d8ede1" letter-spacing="-2">Your listening</text>
+  <text x="96" y="378" font-family="Inter" font-size="72" font-weight="700" fill="#d8ede1" letter-spacing="-2">history, on <tspan fill="#3fb968">ATProto.</tspan></text>
+
+  <!-- Subline -->
+  <text x="96" y="434" font-family="Inter" font-size="24" fill="#6b9e7e">Import Last.fm &amp; Spotify scrobbles to Teal — free, open-source,</text>
+  <text x="96" y="462" font-family="Inter" font-size="24" fill="#6b9e7e">runs entirely in your browser.</text>
+
+  <!-- Pill row -->
+  <g transform="translate(96, 500)">
+    <rect x="0" y="0" width="130" height="40" rx="8" fill="#0e1a13" stroke="#1f3328" stroke-width="1.5" />
+    <text x="65" y="26" font-family="JetBrains Mono" font-size="16" fill="#d8ede1" text-anchor="middle">Last.fm</text>
+    <rect x="148" y="0" width="130" height="40" rx="8" fill="#0e1a13" stroke="#1f3328" stroke-width="1.5" />
+    <text x="213" y="26" font-family="JetBrains Mono" font-size="16" fill="#d8ede1" text-anchor="middle">Spotify</text>
+    <text x="302" y="26" font-family="Inter" font-size="22" fill="#3fb968" text-anchor="middle">→</text>
+    <rect x="320" y="0" width="100" height="40" rx="8" fill="#152019" stroke="#3fb968" stroke-width="1.5" />
+    <text x="370" y="26" font-family="JetBrains Mono" font-size="16" fill="#3fb968" text-anchor="middle">Teal</text>
+  </g>
+
+  <!-- Right decorative: hexagon cluster -->
+  <g transform="translate(980, 315)" filter="url(#glow)" opacity="0.85">
+    <polygon points="0,-110 95,-55 95,55 0,110 -95,55 -95,-55" fill="none" stroke="#1f3328" stroke-width="1.5" />
+    <polygon points="0,-80 69,-40 69,40 0,80 -69,40 -69,-40" fill="none" stroke="#2d8a4e" stroke-width="1.5" opacity="0.6" />
+    <polygon points="0,-50 43,-25 43,25 0,50 -43,25 -43,-25" fill="#152019" stroke="#3fb968" stroke-width="2" />
+    <polygon points="0,-28 24,-14 24,14 0,28 -24,14 -24,-14" fill="#3fb968" opacity="0.15" />
+    <polygon points="0,-28 24,-14 24,14 0,28 -24,14 -24,-14" fill="none" stroke="#3fb968" stroke-width="2" />
+    <circle cx="0" cy="0" r="5" fill="#3fb968" />
+    <line x1="0" y1="-50" x2="0" y2="-80" stroke="#3fb968" stroke-width="1" opacity="0.5" />
+    <line x1="43" y1="-25" x2="69" y2="-40" stroke="#3fb968" stroke-width="1" opacity="0.5" />
+    <line x1="43" y1="25" x2="69" y2="40" stroke="#3fb968" stroke-width="1" opacity="0.5" />
+    <line x1="0" y1="50" x2="0" y2="80" stroke="#3fb968" stroke-width="1" opacity="0.5" />
+    <line x1="-43" y1="25" x2="-69" y2="40" stroke="#3fb968" stroke-width="1" opacity="0.5" />
+    <line x1="-43" y1="-25" x2="-69" y2="-40" stroke="#3fb968" stroke-width="1" opacity="0.5" />
+    <circle cx="0" cy="-110" r="3" fill="#3fb968" opacity="0.6" />
+    <circle cx="95" cy="-55" r="3" fill="#3fb968" opacity="0.6" />
+    <circle cx="95" cy="55" r="3" fill="#3fb968" opacity="0.6" />
+    <circle cx="0" cy="110" r="3" fill="#3fb968" opacity="0.6" />
+    <circle cx="-95" cy="55" r="3" fill="#3fb968" opacity="0.6" />
+    <circle cx="-95" cy="-55" r="3" fill="#3fb968" opacity="0.6" />
+  </g>
+
+  <!-- Bottom accent -->
+  <rect x="0" y="618" width="1200" height="12" fill="#3fb968" opacity="0.5" />
+</svg>
