@@ -28,6 +28,18 @@ export interface PublisherCallbacks {
   isCancelled: () => boolean;
 }
 
+/** Sleep for up to `ms` milliseconds, waking early if `isCancelled()` becomes true. */
+function cancellableSleep(ms: number, isCancelled: () => boolean): Promise<void> {
+  return new Promise((resolve) => {
+    const end = Date.now() + ms;
+    const tick = () => {
+      if (isCancelled() || Date.now() >= end) { resolve(); return; }
+      setTimeout(tick, Math.min(50, end - Date.now()));
+    };
+    tick();
+  });
+}
+
 function normalizeResponseHeaders(response: any): Record<string, string> {
   const headers: Record<string, string> = {};
   if (response?.headers) {
@@ -47,6 +59,10 @@ export async function publishRecords(
   callbacks: PublisherCallbacks
 ): Promise<{ successCount: number; errorCount: number; cancelled: boolean }> {
   const { onProgress, onLog, isCancelled } = callbacks;
+
+  // Abort controller so we can cut off any in-flight fetch the instant Stop is pressed.
+  const ac = new AbortController();
+  const cancelPoll = setInterval(() => { if (isCancelled()) ac.abort(); }, 50);
   const total = records.length;
 
   if (dryRun) {
@@ -69,7 +85,7 @@ export async function publishRecords(
   const startTime = Date.now();
 
   onLog('info', `Publishing ${total.toLocaleString()} records to ATProto…`);
-  onLog('warn', 'Do not close this tab during import.');
+  onLog('warn', 'Do not close this tab while publishing.');
 
   while (i < total) {
     if (isCancelled()) {
@@ -102,13 +118,18 @@ export async function publishRecords(
     );
 
     const batchPoints = batch.length * POINTS_PER_RECORD;
-    await rl.waitForPermit(batchPoints);
+    await rl.waitForPermit(batchPoints, isCancelled);
+    if (isCancelled()) {
+      clearInterval(cancelPoll);
+      onLog('warn', 'Import cancelled by user.');
+      return { successCount, errorCount, cancelled: true };
+    }
 
     try {
-      const response = await agent.com.atproto.repo.applyWrites({
-        repo: agent.session?.did ?? '',
-        writes: writes as any
-      });
+      const response = await agent.com.atproto.repo.applyWrites(
+        { repo: agent.session?.did ?? '', writes: writes as any },
+        { signal: ac.signal }
+      );
 
       successCount += response.data.results?.length ?? batch.length;
 
@@ -142,6 +163,11 @@ export async function publishRecords(
 
       i += batch.length;
     } catch (err: any) {
+      if (ac.signal.aborted || isCancelled()) {
+        clearInterval(cancelPoll);
+        onLog('warn', 'Import cancelled by user.');
+        return { successCount, errorCount, cancelled: true };
+      }
       if (isRateLimitError(err)) {
         onLog('warn', '⚠️  Rate limit hit — waiting for quota reset…');
         // Extract headers from error if present
@@ -160,9 +186,10 @@ export async function publishRecords(
     }
 
     if (i < total) {
-      await new Promise((r) => setTimeout(r, currentDelay));
+      await cancellableSleep(currentDelay, isCancelled);
     }
   }
 
+  clearInterval(cancelPoll);
   return { successCount, errorCount, cancelled: false };
 }
