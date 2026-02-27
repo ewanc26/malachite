@@ -4,3 +4,4 @@ node_modules/
 .env
 *.csv
 dist/
+diff.txt

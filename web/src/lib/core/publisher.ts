@@ -4,7 +4,7 @@
  * Uses in-memory rate limiting and progress callbacks instead of console.log.
  */
 
-import type { AtpAgent } from '@atproto/api';
+import type { Agent } from '@atproto/api';
 import type { PlayRecord } from '../types.js';
 import { RECORD_TYPE, MAX_PDS_BATCH_SIZE, POINTS_PER_RECORD } from '../config.js';
 import { BrowserRateLimiter } from './rate-limiter.js';
@@ -53,7 +53,7 @@ function normalizeResponseHeaders(response: any): Record<string, string> {
 }
 
 export async function publishRecords(
-  agent: AtpAgent,
+  agent: Agent,
   records: PlayRecord[],
   dryRun: boolean,
   callbacks: PublisherCallbacks
@@ -127,7 +127,7 @@ export async function publishRecords(
 
     try {
       const response = await agent.com.atproto.repo.applyWrites(
-        { repo: agent.session?.did ?? '', writes: writes as any },
+        { repo: agent.did ?? '', writes: writes as any },
         { signal: ac.signal }
       );
 

@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
-  import type { AtpAgent } from '@atproto/api';
+  import type { Agent } from '@atproto/api';
 
+  import { initOAuth } from '$lib/core/oauth.js';
   import { modeNeeds, stepLabelsFor } from '$lib/modes.js';
   import { runImport, type PublishProgress } from '$lib/core/import.js';
   import type { ImportMode, LogEntry } from '$lib/types.js';
@@ -14,13 +16,23 @@
   import OptionsStep   from '$lib/components/steps/OptionsStep.svelte';
   import RunStep       from '$lib/components/steps/RunStep.svelte';
 
+  // ─── persistence keys ────────────────────────────────────────────────────────
+
+  const KEY_MODE = 'malachite:mode';
+  const KEY_STEP = 'malachite:step';
+
   // ─── wizard state ────────────────────────────────────────────────────────────
+  // Read synchronously from sessionStorage — safe because ssr = false.
+  // This eliminates FOUC: the component renders immediately into the right step.
 
-  let step     = $state(0);
-  let prevStep = $state(0);
-  let mode     = $state<ImportMode | null>(null);
+  const _initMode = sessionStorage.getItem(KEY_MODE) as ImportMode | null;
+  const _initStep = Number(sessionStorage.getItem(KEY_STEP)) || 0;
 
-  let agent        = $state<AtpAgent | null>(null);
+  let step     = $state(_initStep);
+  let prevStep = $state(_initStep);
+  let mode     = $state<ImportMode | null>(_initMode);
+
+  let agent        = $state<Agent | null>(null);
   let lastfmFiles  = $state<File[]>([]);
   let spotifyFiles = $state<File[]>([]);
 
@@ -48,16 +60,24 @@
 
   // ─── navigation ──────────────────────────────────────────────────────────────
 
-  function goTo(n: number) { prevStep = step; step = n; }
+  function goTo(n: number) {
+    prevStep = step;
+    step = n;
+    sessionStorage.setItem(KEY_STEP, String(n));
+  }
 
-  function handleSelectMode(m: ImportMode) { mode = m; goTo(1); }
+  function handleSelectMode(m: ImportMode) {
+    mode = m;
+    sessionStorage.setItem(KEY_MODE, m);
+    goTo(1);
+  }
 
   function handleBack() {
     if (step === 3 && mode === 'deduplicate') { goTo(1); return; }
     goTo(Math.max(0, step - 1));
   }
 
-  function handleAuth(a: AtpAgent) {
+  function handleAuth(a: Agent) {
     agent = a;
     goTo(needs.files ? 2 : 3);
   }
@@ -107,7 +127,27 @@
     }
   }
 
+  // ─── OAuth callback ────────────────────────────────────────────────────────
+
+  onMount(async () => {
+    // If the URL contains an OAuth callback (?code=…&state=…), init() processes
+    // it and returns the new session. If a session was already stored from a
+    // previous visit it also comes back here.
+    try {
+      const oauthAgent = await initOAuth();
+      if (oauthAgent) {
+        agent = oauthAgent;
+        // mode is already restored synchronously from sessionStorage above.
+        goTo(modeNeeds(mode).files ? 2 : 3);
+      }
+    } catch (err: any) {
+      console.error('OAuth init error:', err);
+    }
+  });
+
   function handleReset() {
+    sessionStorage.removeItem(KEY_MODE);
+    sessionStorage.removeItem(KEY_STEP);
     prevStep = step; step = 0; mode = null; agent = null;
     lastfmFiles = []; spotifyFiles = [];
     dryRun = false; reverseOrder = false; fresh = false;
