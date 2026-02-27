@@ -5,6 +5,20 @@
 <svelte:head>
   <title>Malachite — Import your music history to Teal</title>
   <meta name="description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Free, open-source, runs in your browser." />
+  <link rel="canonical" href="https://malachite.ewancroft.uk" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://malachite.ewancroft.uk" />
+  <meta property="og:title" content="Malachite — Import your music history to Teal" />
+  <meta property="og:description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Free, open-source, runs in your browser." />
+  <meta property="og:image" content="https://malachite.ewancroft.uk/og-home.svg" />
+
+  <!-- Twitter / X card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Malachite — Import your music history to Teal" />
+  <meta name="twitter:description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Free, open-source, runs in your browser." />
+  <meta name="twitter:image" content="https://malachite.ewancroft.uk/og-home.svg" />
 </svelte:head>
 
 <main>
