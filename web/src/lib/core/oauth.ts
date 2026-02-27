@@ -14,10 +14,12 @@ import { Agent } from '@atproto/api';
 // The client_id must be http://localhost with no path (query params are fine).
 //
 // In production, load() fetches the metadata from the https:// URL.
+const SCOPE = 'atproto transition:generic';
+
 const CLIENT_ID = import.meta.env.DEV
   ? `http://localhost?${new URLSearchParams([
       ['redirect_uri', 'http://127.0.0.1:5173/import'],
-      ['scope', 'atproto transition:generic'],
+      ['scope', SCOPE],
     ])}`
   : 'https://malachite.ewancroft.uk/client-metadata.json';
 
@@ -40,13 +42,7 @@ function getClient(): Promise<BrowserOAuthClient> {
 /**
  * Call once on mount on the /import page.
  * Processes any OAuth callback params in the URL and restores stored sessions.
- * Returns `{ session, agent }` if a session is active, or `null` if the user
- * still needs to sign in.
- */
-/**
- * Call once on mount on the /import page.
- * Returns an Agent if a session was restored or a callback was processed,
- * or null if the user still needs to sign in.
+ * Returns an Agent if a session is active, or null if the user still needs to sign in.
  */
 export async function initOAuth(): Promise<Agent | null> {
   const client = await getClient();
@@ -61,6 +57,6 @@ export async function initOAuth(): Promise<Agent | null> {
  */
 export async function signInWithOAuth(handle: string): Promise<never> {
   const client = await getClient();
-  await client.signIn(handle, { scope: 'atproto transition:generic' });
+  await client.signIn(handle, { scope: SCOPE });
   throw new Error('redirect should have occurred');
 }
