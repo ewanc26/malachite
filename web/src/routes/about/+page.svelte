@@ -98,6 +98,7 @@
       <div class="person-links">
         <a href="https://github.com/ewanc26" target="_blank" rel="noopener">GitHub</a>
         <a href="https://ko-fi.com/ewancroft" target="_blank" rel="noopener">Ko-fi</a>
+        <a href="https://ewancroft.uk" target="_blank" rel="noopener">Website</a>
       </div>
     </div>
 
