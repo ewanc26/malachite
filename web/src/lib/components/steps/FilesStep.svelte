@@ -122,9 +122,9 @@
       <details>
         <summary>How to export from Last.fm</summary>
         <p>
-          Go to <a href="https://www.last.fm/settings/dataexporter" target="_blank" rel="noopener">
-            last.fm/settings/dataexporter
-          </a>, request a data export, and download the CSV once ready.
+          Use the third-party export tool at <a href="https://lastfm.ghan.nl/export/" target="_blank" rel="noopener">
+            lastfm.ghan.nl/export
+          </a> to download your scrobble history as a CSV.
         </p>
       </details>
     {/if}
