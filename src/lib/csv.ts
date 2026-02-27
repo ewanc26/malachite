@@ -178,14 +178,6 @@ export function parseLastFmCsv(filePath: string): LastFmCsvRecord[] {
   return parseLastFmCsvContent(fileContent);
 }
 
-/** @deprecated internal – kept for reference, use parseLastFmCsvContent */
-function _parseLastFmCsvLegacy(filePath: string): LastFmCsvRecord[] {
-  console.log(`Reading CSV file: ${filePath}`);
-  let fileContent = fs.readFileSync(filePath, 'utf-8');
-  
-  // (legacy body – superseded by parseLastFmCsvContent)
-  return parseLastFmCsvContent(fileContent);
-}
 
 /**
  * Convert Last.fm CSV record to ATProto play record
