@@ -19,6 +19,7 @@ export default defineConfig({
 		include: ['@atproto/api', '@atproto/common-web']
 	},
 	build: {
-		target: 'es2022'
+		target: 'es2022',
+		chunkSizeWarningLimit: 1000 // @atproto/oauth-client-browser is large but unsplittable
 	}
 });
