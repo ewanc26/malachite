@@ -66,9 +66,14 @@
     sessionStorage.setItem(KEY_STEP, String(n));
   }
 
-  function handleSelectMode(m: ImportMode) {
+  function setMode(m: ImportMode | null) {
     mode = m;
-    sessionStorage.setItem(KEY_MODE, m);
+    if (m) sessionStorage.setItem(KEY_MODE, m);
+    else    sessionStorage.removeItem(KEY_MODE);
+  }
+
+  function handleSelectMode(m: ImportMode) {
+    setMode(m);
     goTo(1);
   }
 
@@ -146,10 +151,9 @@
   });
 
   function handleReset() {
-    sessionStorage.removeItem(KEY_MODE);
-    sessionStorage.removeItem(KEY_STEP);
-    prevStep = step; step = 0; mode = null; agent = null;
-    lastfmFiles = []; spotifyFiles = [];
+    setMode(null);
+    goTo(0);
+    agent = null; lastfmFiles = []; spotifyFiles = [];
     dryRun = false; reverseOrder = false; fresh = false;
     logs = []; progress = null; result = null; importError = null;
     cancelled = false; stopping = false;
