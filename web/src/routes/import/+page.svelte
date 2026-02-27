@@ -163,21 +163,21 @@
 <svelte:head>
   <title>Malachite — Import to Teal</title>
   <meta name="description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import." />
-  <link rel="canonical" href="https://malachite.ewancroft.uk/import" />
+  <link rel="canonical" href="https://malachite.croft.click/import" />
   <meta name="robots" content="noindex" />
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://malachite.ewancroft.uk/import" />
+  <meta property="og:url" content="https://malachite.croft.click/import" />
   <meta property="og:title" content="Malachite — Import to Teal" />
   <meta property="og:description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import." />
-  <meta property="og:image" content="https://malachite.ewancroft.uk/og-import.svg" />
+  <meta property="og:image" content="https://malachite.croft.click/og-import.svg" />
 
   <!-- Twitter / X card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Malachite — Import to Teal" />
   <meta name="twitter:description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import." />
-  <meta name="twitter:image" content="https://malachite.ewancroft.uk/og-import.svg" />
+  <meta name="twitter:image" content="https://malachite.croft.click/og-import.svg" />
 </svelte:head>
 
 <main>

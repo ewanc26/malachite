@@ -21,7 +21,7 @@ const CLIENT_ID = import.meta.env.DEV
       ['redirect_uri', 'http://127.0.0.1:5173/import'],
       ['scope', SCOPE],
     ])}`
-  : 'https://malachite.ewancroft.uk/client-metadata.json';
+  : 'https://malachite.croft.click/client-metadata.json';
 
 // Singleton promise — BrowserOAuthClient.load() is async.
 let _client: Promise<BrowserOAuthClient> | null = null;
