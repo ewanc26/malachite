@@ -20,13 +20,13 @@
 
 <section class="card-section">
   <button class="back-btn" onclick={onback}>← Back</button>
-  <h2 class="section-title">Import options</h2>
+  <h2 class="section-title">{mode === 'deduplicate' ? 'Deduplication options' : 'Import options'}</h2>
 
   <div class="options">
     <div class="option-row">
       <div class="option-info">
         <span class="option-name">Dry run</span>
-        <span class="option-desc">Preview what would be imported without making changes</span>
+        <span class="option-desc">{mode === 'deduplicate' ? 'Preview duplicates that would be removed without making changes' : 'Preview what would be imported without making changes'}</span>
       </div>
       <button
         class="toggle"
@@ -82,7 +82,11 @@
   {/if}
 
   <button class="btn-primary" onclick={onstartimport}>
-    {dryRun ? 'Preview import →' : 'Start import →'}
+    {#if mode === 'deduplicate'}
+      {dryRun ? 'Preview duplicates →' : 'Start deduplication →'}
+    {:else}
+      {dryRun ? 'Preview import →' : 'Start import →'}
+    {/if}
   </button>
 </section>
 

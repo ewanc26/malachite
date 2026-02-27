@@ -3,7 +3,7 @@
  * Fetches existing records from ATProto and filters for new ones.
  */
 
-import type { AtpAgent } from '@atproto/api';
+import type { Agent } from '@atproto/api';
 import type { PlayRecord } from '../types.js';
 import { RECORD_TYPE } from '../config.js';
 
@@ -22,12 +22,12 @@ function recordKey(r: PlayRecord): string {
 const sessionCache = new Map<string, Map<string, ExistingRecord>>();
 
 export async function fetchExistingRecords(
-  agent: AtpAgent,
+  agent: Agent,
   onProgress?: (fetched: number) => void,
   forceRefresh = false,
   signal?: AbortSignal
 ): Promise<Map<string, ExistingRecord>> {
-  const did = agent.session?.did;
+  const did = agent.did;
   if (!did) throw new Error('No authenticated session');
 
   if (!forceRefresh && sessionCache.has(did)) {
@@ -73,11 +73,11 @@ export function filterNewRecords(
 }
 
 export async function fetchAllRecordsForDedup(
-  agent: AtpAgent,
+  agent: Agent,
   onProgress?: (fetched: number) => void,
   signal?: AbortSignal
 ): Promise<ExistingRecord[]> {
-  const did = agent.session?.did;
+  const did = agent.did;
   if (!did) throw new Error('No authenticated session');
 
   const all: ExistingRecord[] = [];
@@ -127,7 +127,7 @@ export function findDuplicateGroups(records: ExistingRecord[]): DedupGroup[] {
 }
 
 export async function removeDuplicateRecords(
-  agent: AtpAgent,
+  agent: Agent,
   groups: DedupGroup[],
   onProgress?: (removed: number) => void,
   signal?: AbortSignal
@@ -138,7 +138,7 @@ export async function removeDuplicateRecords(
       signal?.throwIfAborted();
       try {
         await agent.com.atproto.repo.deleteRecord(
-          { repo: agent.session?.did ?? '', collection: RECORD_TYPE, rkey: rec.uri.split('/').pop()! },
+          { repo: agent.did ?? '', collection: RECORD_TYPE, rkey: rec.uri.split('/').pop()! },
           { signal }
         );
         removed++;

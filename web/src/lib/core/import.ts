@@ -3,7 +3,7 @@
  * Handles all five ImportMode flows with progress + cancellation callbacks.
  */
 
-import type { AtpAgent } from '@atproto/api';
+import type { Agent } from '@atproto/api';
 import type { ImportMode, LogEntry, PlayRecord } from '../types.js';
 import { parseLastFmFile, convertToPlayRecord } from './csv.js';
 import { parseSpotifyFiles, convertSpotifyToPlayRecord } from './spotify.js';
@@ -38,7 +38,7 @@ export interface ImportCallbacks {
 }
 
 export async function runImport(
-  agent: AtpAgent,
+  agent: Agent,
   mode: ImportMode,
   lastfmFiles: File[],
   spotifyFiles: File[],
