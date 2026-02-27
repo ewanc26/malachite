@@ -24,7 +24,8 @@ const sessionCache = new Map<string, Map<string, ExistingRecord>>();
 export async function fetchExistingRecords(
   agent: AtpAgent,
   onProgress?: (fetched: number) => void,
-  forceRefresh = false
+  forceRefresh = false,
+  signal?: AbortSignal
 ): Promise<Map<string, ExistingRecord>> {
   const did = agent.session?.did;
   if (!did) throw new Error('No authenticated session');
@@ -39,12 +40,11 @@ export async function fetchExistingRecords(
   let batchSize = 50;
 
   do {
-    const res = await agent.com.atproto.repo.listRecords({
-      repo: did,
-      collection: RECORD_TYPE,
-      limit: batchSize,
-      cursor
-    });
+    signal?.throwIfAborted();
+    const res = await agent.com.atproto.repo.listRecords(
+      { repo: did, collection: RECORD_TYPE, limit: batchSize, cursor },
+      { signal }
+    );
 
     for (const rec of res.data.records) {
       const value = rec.value as unknown as PlayRecord;
@@ -56,7 +56,6 @@ export async function fetchExistingRecords(
     cursor = res.data.cursor;
     onProgress?.(total);
 
-    // Simple adaptive sizing
     if (res.data.records.length === batchSize && batchSize < 100) {
       batchSize = Math.min(100, batchSize * 2);
     }
@@ -75,7 +74,8 @@ export function filterNewRecords(
 
 export async function fetchAllRecordsForDedup(
   agent: AtpAgent,
-  onProgress?: (fetched: number) => void
+  onProgress?: (fetched: number) => void,
+  signal?: AbortSignal
 ): Promise<ExistingRecord[]> {
   const did = agent.session?.did;
   if (!did) throw new Error('No authenticated session');
@@ -85,12 +85,11 @@ export async function fetchAllRecordsForDedup(
   let batchSize = 50;
 
   do {
-    const res = await agent.com.atproto.repo.listRecords({
-      repo: did,
-      collection: RECORD_TYPE,
-      limit: batchSize,
-      cursor
-    });
+    signal?.throwIfAborted();
+    const res = await agent.com.atproto.repo.listRecords(
+      { repo: did, collection: RECORD_TYPE, limit: batchSize, cursor },
+      { signal }
+    );
 
     for (const rec of res.data.records) {
       const value = rec.value as unknown as PlayRecord;
@@ -130,22 +129,28 @@ export function findDuplicateGroups(records: ExistingRecord[]): DedupGroup[] {
 export async function removeDuplicateRecords(
   agent: AtpAgent,
   groups: DedupGroup[],
-  onProgress?: (removed: number) => void
+  onProgress?: (removed: number) => void,
+  signal?: AbortSignal
 ): Promise<number> {
   let removed = 0;
   for (const group of groups) {
     for (const rec of group.records.slice(1)) {
+      signal?.throwIfAborted();
       try {
-        await agent.com.atproto.repo.deleteRecord({
-          repo: agent.session?.did ?? '',
-          collection: RECORD_TYPE,
-          rkey: rec.uri.split('/').pop()!
-        });
+        await agent.com.atproto.repo.deleteRecord(
+          { repo: agent.session?.did ?? '', collection: RECORD_TYPE, rkey: rec.uri.split('/').pop()! },
+          { signal }
+        );
         removed++;
         onProgress?.(removed);
-        await new Promise((r) => setTimeout(r, 100));
-      } catch {
-        // continue on individual failures
+        // Short delay — cancellable via the signal
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, 100);
+          signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason); }, { once: true });
+        });
+      } catch (err: any) {
+        if (signal?.aborted) throw err; // propagate abort
+        // otherwise continue on individual failures
       }
     }
   }

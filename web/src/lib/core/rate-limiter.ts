@@ -59,7 +59,7 @@ export class BrowserRateLimiter {
     return this.state !== null && this.state.limit > 0;
   }
 
-  async waitForPermit(pointsNeeded: number): Promise<void> {
+  async waitForPermit(pointsNeeded: number, isCancelled?: () => boolean): Promise<void> {
     if (!this.state) return; // no state yet — let first request probe
 
     const now = Math.floor(Date.now() / 1000);
@@ -72,10 +72,17 @@ export class BrowserRateLimiter {
     const effective = this.state.remaining - headroomPts;
 
     if (effective < pointsNeeded) {
-      // Wait until the window resets
-      const waitMs = Math.max(0, (this.state.resetAt - Math.floor(Date.now() / 1000)) + 1) * 1000;
-      await new Promise((r) => setTimeout(r, waitMs));
-      if (this.state) {
+      // Wait until the window resets, but poll for cancellation every 50 ms.
+      const resetMs = Math.max(0, (this.state.resetAt - Math.floor(Date.now() / 1000)) + 1) * 1000;
+      const end = Date.now() + resetMs;
+      await new Promise<void>((resolve) => {
+        const tick = () => {
+          if ((isCancelled?.()) || Date.now() >= end) { resolve(); return; }
+          setTimeout(tick, Math.min(50, end - Date.now()));
+        };
+        tick();
+      });
+      if (this.state && !isCancelled?.()) {
         this.state.remaining = this.state.limit;
         this.state.resetAt = Math.floor(Date.now() / 1000) + this.state.windowSeconds;
       }
