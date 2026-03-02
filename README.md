@@ -8,9 +8,9 @@ Import your Last.fm and Spotify listening history to the AT Protocol network usi
 ## Table of Contents
 
 - [⚠️ Important: Rate Limits](#️-important-rate-limits)
-  - [📚 Rate Limiting Documentation](#-rate-limiting-documentation)
   - [How Dynamic Batch Sizing Works](#how-dynamic-batch-sizing-works)
 - [What's with the name?](#whats-with-the-name)
+- [Web App](#web-app)
 - [Quick Start](#quick-start)
   - [Interactive Mode (Recommended for First-Time Users)](#interactive-mode-recommended-for-first-time-users)
   - [Command Line Mode](#command-line-mode)
@@ -81,16 +81,6 @@ This importer automatically protects your PDS by:
 - Providing clear progress tracking and time estimates
 - Persisting state across restarts for safe resume
 
-### 📚 Rate Limiting Documentation
-
-Malachite has comprehensive rate limiting protection built in.
-
-**New**: Monitor your rate limit status anytime:
-
-```bash
-npm run check-limits
-```
-
 ### How Dynamic Batch Sizing Works
 
 Malachite continuously monitors your rate limit quota and automatically adjusts batch size:
@@ -114,13 +104,29 @@ Below Headroom (700)         → Batch Size: 1 record (minimal progress)
 
 For more details, see the [Bluesky Rate Limits Documentation](https://docs.bsky.app/blog/rate-limits-pds-v3).
 
-## What’s with the name?
+## What's with the name?
 
 It used to be called `atproto-lastfm-importer` — generic as fuck. That name told you what it did and nothing about why it mattered, and it sounded like a disposable weekend script. So I renamed it.
 
 At the moment, the repository is still called `atproto-lastfm-importer` on Tangled, but the GitHub link has been updated to `malachite`. I do not know if this can be resolved.
 
-**Malachite** is a greenish-blue copper mineral associated with preservation and transformation. That’s exactly what this tool does: it preserves your scrobbles and transforms them into proper `fm.teal.alpha.feed.play` records on the AT Protocol. The colour match isn’t an accident — malachite sits squarely in the teal/green range, a deliberate nod to the `teal` lexicon it publishes to.
+**Malachite** is a greenish-blue copper mineral associated with preservation and transformation. That's exactly what this tool does: it preserves your scrobbles and transforms them into proper `fm.teal.alpha.feed.play` records on the AT Protocol. The colour match isn't an accident — malachite sits squarely in the teal/green range, a deliberate nod to the `teal` lexicon it publishes to.
+
+## Web App
+
+Malachite also ships a browser-based web app (`web/`) built with SvelteKit. It supports all five import modes and signs in via ATProto OAuth — no app password required.
+
+**Running the web app in development:**
+
+```bash
+cd web
+pnpm install
+pnpm dev          # starts at http://127.0.0.1:5173
+```
+
+> **Note:** The dev server must run on `127.0.0.1:5173` exactly. This is enforced in `vite.config.ts` because the OAuth loopback `redirect_uri` is pinned to that origin (RFC 8252 §7.3). Do not change the host or port without updating the OAuth client metadata.
+
+The web app fetches existing records using the same CAR-export path as the CLI (`com.atproto.sync.getRepo`) so it costs zero AppView write-quota points to check for duplicates.
 
 ## Quick Start
 
@@ -173,10 +179,11 @@ node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 
 ### Performance & Safety
 
-- ✅ **Automatic Duplicate Prevention**: Automatically checks Teal and skips records that already exist (no duplicates!)
+- ✅ **Automatic Duplicate Prevention**: Fetches your existing Teal records via CAR export and skips anything already imported
 - ✅ **Input Deduplication**: Removes duplicate entries within the source file before submission
 - ✅ **Dynamic Batch Sizing**: Automatically adjusts batch size (1-200 records) based on available rate limit quota
 - ✅ **Batch Operations**: Uses `com.atproto.repo.applyWrites` for efficient batch publishing (up to 200 records per call)
+- ✅ **Zero-cost sync check**: Existing record fetching uses `com.atproto.sync.getRepo` (CAR export) — a separate, far more generous rate-limit envelope that costs zero AppView write-quota points
 - ✅ **Intelligent Rate Limiting**: Real-time quota monitoring with 15% headroom buffer prevents rate limit exhaustion
 - ✅ **Adaptive Recovery**: Automatically scales back to maximum speed after quota resets
 - ✅ **Multi-Day Imports**: Large imports automatically span multiple days with 24-hour pauses
@@ -190,6 +197,7 @@ node dist/index.js -i lastfm.csv -h alice.bsky.social -p xxxx-xxxx-xxxx-xxxx -y
 - ✅ **Dry Run Mode**: Preview records without publishing
 - ✅ **Interactive Mode**: Simple prompts guide you through the process
 - ✅ **Command Line Mode**: Full automation support for scripting
+- ✅ **Web App**: Browser-based UI with ATProto OAuth sign-in
 
 ### Technical Features
 
@@ -222,27 +230,6 @@ pnpm start -i lastfm.csv --spotify-input spotify-export/ -m combined -h alice.bs
 4. Chooses the best version of each play (prefers Last.fm with MusicBrainz IDs)
 5. Merges into a single chronological timeline
 6. Shows detailed statistics about the merge
-
-**Example output:**
-
-```
-📊 Merge Statistics
-═══════════════════════════════════════════
-Last.fm records:     15,234
-Spotify records:     8,567
-Total before merge:  23,801
-
-Duplicates removed:  3,421
-Last.fm unique:      11,813
-Spotify unique:      5,146
-
-Final merged total:  16,959
-
-Date range:
-  First: 2015-03-15 10:23:45
-  Last:  2025-01-07 14:32:11
-═══════════════════════════════════════════
-```
 
 ### Re-Sync Mode
 
@@ -420,7 +407,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
 - **trackName**: The name of the track
 - **artists**: Array of artist objects (requires `artistName`, optional `artistMbId` for Last.fm)
 - **playedTime**: ISO 8601 timestamp of when you listened
-- **submissionClientAgent**: Identifies this importer (`malachite/v0.9.3`)
+- **submissionClientAgent**: Identifies this importer (`malachite/v0.10.0` for CLI, `malachite/v0.3.0 (web)` for the web app)
 - **musicServiceBaseDomain**: Set to `last.fm` or `spotify.com`
 
 ### Optional Fields
@@ -449,7 +436,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
   "recordingMbId": "3a390ad3-fe56-45f2-a073-bebc45d6bde1",
   "playedTime": "2025-11-13T23:49:36Z",
   "originUrl": "https://www.last.fm/music/Cjbeards/_/Paint+My+Masterpiece",
-  "submissionClientAgent": "malachite/v0.9.3",
+  "submissionClientAgent": "malachite/v0.10.0",
   "musicServiceBaseDomain": "last.fm"
 }
 ```
@@ -468,7 +455,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
   "releaseName": "Twenty",
   "playedTime": "2021-09-09T10:34:08Z",
   "originUrl": "https://open.spotify.com/track/3gZqDJkMZipOYCRjlHWgOV",
-  "submissionClientAgent": "malachite/v0.9.3",
+  "submissionClientAgent": "malachite/v0.10.0",
   "musicServiceBaseDomain": "spotify.com"
 }
 ```
@@ -484,7 +471,7 @@ Each scrobble becomes an `fm.teal.alpha.feed.play` record with:
    - Spotify: Automatically removes podcasts, audiobooks, and non-music content
 3. **Converts to schema**: Maps to `fm.teal.alpha.feed.play` format
 4. **Deduplicates input**: Removes duplicate entries from the source data (keeps first occurrence)
-5. **Checks Teal**: Fetches existing records and skips any that are already imported (prevents duplicates)
+5. **Checks Teal**: Downloads the entire repo as a CAR file (`com.atproto.sync.getRepo`) and skips any records already imported — costs zero AppView write-quota points
 6. **Sorts records**: Chronologically (oldest first) or reverse with `-r` flag
 7. **Generates TID-based keys**: From `playedTime` for chronological ordering
 8. **Validates fields**: Ensures required fields are present
@@ -510,57 +497,26 @@ Removes duplicates within your source file(s):
 - Subsequent duplicates are removed
 - Shows message: "No duplicates found in input data" or "Removed X duplicate(s)"
 
-#### Step 2: Teal Comparison (Automatic & Adaptive)
+#### Step 2: Teal Comparison via CAR Export
 
-**Automatically checks your existing Teal records** and skips any that are already imported:
+**Automatically checks your existing Teal records** by downloading your entire repo as a CARv1 file:
 
-**What happens:**
-
-- Fetches all existing records from your Teal feed with **adaptive batch sizing**
-- Starts with small batches (25 records) and automatically adjusts based on network performance
-- Increases batch size (up to 100) when network is fast
-- Decreases batch size (down to 10) when network is slow
-- Shows real-time progress with fetch rate (records/second) and current batch size
-- Compares against your input file
-- Only imports records that don't already exist
-- Shows: "Found X record(s) already in Teal (skipping)"
-
-**Example output:**
-
-```
-✓ Loaded 10,234 records
-ℹ No duplicates found in input data
-
-=== Checking Existing Records ===
-ℹ Fetching records from Teal to avoid duplicates...
-→ Fetched 1,000 records (125 rec/s, batch: 37, 8.0s)...
-📈 Network good: batch size 37 → 55
-→ Fetched 2,000 records (140 rec/s, batch: 82, 14.3s)...
-📈 Network good: batch size 82 → 100
-→ Fetched 3,000 records (155 rec/s, batch: 100, 19.4s)...
-...
-✓ Found 9,500 existing records in 61.3s (avg 155 rec/s)
-
-=== Identifying New Records ===
-ℹ Total: 10,234 records
-ℹ Existing: 9,100 already in Teal
-ℹ New: 1,134 to import
-```
+- One HTTP request fetches the whole repo (`com.atproto.sync.getRepo`)
+- The CAR file is parsed locally in memory — no AppView quota consumed
+- Compares every record against your input and skips anything already imported
+- Shows: "Skipped X already-imported record(s)"
 
 **This means:**
 
 - ✅ Safe to re-run imports with updated exports
 - ✅ Won't create duplicates if you run the import twice
-- ✅ Only pays for API calls on new records
+- ✅ Zero AppView write-quota cost for the sync check
 - ✅ Works automatically - no special mode needed
-- ✅ Adapts to your network speed - faster on good connections, stable on slow ones
-- ✅ Batch size shown in debug mode (`-v`) for transparency
 
 **Note:**
 
-- This duplicate prevention happens automatically for all imports (default behavior)
-- **Credentials required**: Even `--dry-run` needs `--handle` and `--password` to check Teal
-- **Sync mode** (`-m sync`): Now primarily just shows detailed statistics about what's being synced
+- Credentials are required even for `--dry-run` to fetch the CAR export
+- **Sync mode** (`-m sync`): Shows detailed statistics about what's being skipped
 - **Deduplicate mode** (`-m deduplicate`): Removes duplicates from already-imported Teal records (cleanup tool)
 
 ### Rate Limiting Algorithm
@@ -584,17 +540,6 @@ For imports exceeding the daily limit, the importer automatically:
 3. **Processes Day 1**: Imports the first batch of records
 4. **Pauses 24 hours**: Waits a full day before continuing
 5. **Repeats**: Continues until all records are imported
-
-**Example output for a 20,000 record import:**
-
-```
-📊 Rate Limiting Information:
-   Total records: 20,000
-   Daily limit: 7,500 records/day
-   Estimated duration: 3 days
-   Batch size: 200 records
-   Batch delay: 11.52s
-```
 
 **Important notes:**
 
@@ -730,9 +675,9 @@ Malachite stores all its data in `~/.malachite/`:
 
 ```
 ~/.malachite/
-├── cache/          # Cached Teal records (24-hour TTL)
-├── state/          # Import state for resume functionality
-├── logs/           # Import logs (when file logging is enabled)
+├── cache/           # Cached Teal records (24-hour TTL)
+├── state/           # Import state for resume functionality
+├── logs/            # Import logs (when file logging is enabled)
 └── credentials.json # Encrypted credentials (optional, machine-specific)
 ```
 
@@ -740,7 +685,7 @@ This keeps your project directory clean and follows standard Unix conventions.
 
 ### Credential Storage
 
-Malachite can optionally save your ATProto credentials for convenient reuse:
+Malachite automatically saves your ATProto credentials after a successful login so you don't need to re-enter them on the next run:
 
 **Security Features:**
 
@@ -751,10 +696,9 @@ Malachite can optionally save your ATProto credentials for convenient reuse:
 
 **How It Works:**
 
-1. Interactive mode asks if you want to save credentials after entering them
-2. Credentials are encrypted using a key derived from your hostname + username
-3. Saved to `~/.malachite/credentials.json`
-4. Next time, you'll be prompted to use saved credentials
+1. Credentials are encrypted using a key derived from your hostname + username and saved to `~/.malachite/credentials.json` after every successful login
+2. On the next run, Malachite loads saved credentials automatically
+3. In interactive mode, you'll be prompted whether to use the saved credentials or enter new ones
 
 **Managing Credentials:**
 
@@ -770,7 +714,7 @@ pnpm start
 
 - Credentials are machine-specific and won't work if you copy the file to another computer
 - This is a convenience feature - you can always enter credentials manually
-- If you change your password, you'll need to clear and re-save credentials
+- If you change your password, clear and re-save credentials
 
 ## Project Structure
 
@@ -786,15 +730,33 @@ malachite/
 │   │   ├── merge.ts        # Combined import deduplication
 │   │   └── sync.ts         # Re-sync mode & duplicate detection
 │   ├── utils/
+│   │   ├── car-fetch.ts    # CAR export fetcher (com.atproto.sync.getRepo)
 │   │   ├── logger.ts       # Structured logging system
 │   │   ├── helpers.ts      # Utility functions (timing, formatting)
 │   │   ├── input.ts        # User input handling (prompts, passwords)
-│   │   ├── rate-limiter.ts # Rate limiting calculations
+│   │   ├── rate-limiter.ts # Rate limiting with server-learned quota
 │   │   ├── killswitch.ts   # Graceful shutdown handling
 │   │   ├── tid.ts          # TID generation from timestamps
 │   │   └── ui.ts           # UI elements (spinners, progress bars)
-│   ├── config.ts           # Configuration constants
+│   ├── config.ts           # Configuration constants & version
 │   └── types.ts            # TypeScript type definitions
+├── web/                    # SvelteKit web app
+│   └── src/lib/
+│       ├── core/           # Browser-safe equivalents of src/lib & src/utils
+│       │   ├── auth.ts     # Password-based ATProto login
+│       │   ├── car-fetch.ts# CAR export fetcher (browser-safe)
+│       │   ├── csv.ts      # CSV parser (no csv-parse dep)
+│       │   ├── import.ts   # Import orchestration
+│       │   ├── merge.ts    # Combined import deduplication
+│       │   ├── oauth.ts    # ATProto OAuth client
+│       │   ├── publisher.ts# Batch publisher with progress callbacks
+│       │   ├── rate-limiter.ts # In-memory rate limiter
+│       │   ├── spotify.ts  # Spotify JSON parser
+│       │   ├── sync.ts     # CAR-based sync & dedup
+│       │   └── tid.ts      # TID generation (Web Crypto API)
+│       ├── config.ts       # Shared constants (version injected by Vite)
+│       ├── modes.ts        # Import mode definitions
+│       └── types.ts        # TypeScript type definitions
 ├── lexicons/               # fm.teal.alpha lexicon definitions
 │   └── fm.teal.alpha/
 │       └── feed/
@@ -809,7 +771,8 @@ malachite/
 ### Authentication
 
 - Uses Slingshot resolver to discover your PDS from your handle/DID
-- Requires an ATProto app password (not your main password)
+- Requires an ATProto app password (not your main password) for the CLI
+- Web app supports ATProto OAuth — no app password needed
 - Automatically configures the agent for your personal PDS
 
 ### Batch Publishing
@@ -820,6 +783,10 @@ malachite/
 - **Intelligent quota monitoring** with 15% headroom buffer
 - **Automatic adjustment** - scales down as quota depletes, scales up after reset
 - Enforces minimum delays between batches for rate limit safety
+
+### CAR Export Sync
+
+All read paths (duplicate checks, sync, deduplicate) use `com.atproto.sync.getRepo` to download the user's entire repo as a CARv1 file. The CAR is parsed locally using `@ipld/car` and `@ipld/dag-cbor` — no AppView XRPC calls are made for reads, so the sync check costs zero write-quota points.
 
 ### Data Mapping
 
@@ -866,6 +833,8 @@ AGPL-3.0-only - See LICENCE file for details
 - Follows the `fm.teal.alpha` lexicon standard
 - Colored output via [chalk](https://www.npmjs.com/package/chalk)
 - Progress indicators via [ora](https://www.npmjs.com/package/ora) and [cli-progress](https://www.npmjs.com/package/cli-progress)
+- Web app built with [SvelteKit](https://kit.svelte.dev) and [Tailwind CSS](https://tailwindcss.com)
+- ATProto OAuth via [@atproto/oauth-client-browser](https://www.npmjs.com/package/@atproto/oauth-client-browser)
 
 ---
 

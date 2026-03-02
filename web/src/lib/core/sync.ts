@@ -1,11 +1,13 @@
 /**
  * Browser-compatible sync helpers.
- * Fetches existing records from ATProto and filters for new ones.
+ * Fetches existing records via com.atproto.sync.getRepo (CAR export) —
+ * sync namespace, separate rate-limit envelope, zero AppView quota cost.
  */
 
 import type { Agent } from '@atproto/api';
 import type { PlayRecord } from '../types.js';
 import { RECORD_TYPE } from '../config.js';
+import { fetchRepoViaCAR, getPdsUrlFromAgent } from './car-fetch.js';
 
 export interface ExistingRecord {
   uri: string;
@@ -18,7 +20,7 @@ function recordKey(r: PlayRecord): string {
   return `${artist}|||${r.trackName.toLowerCase().trim()}|||${r.playedTime}`;
 }
 
-/** In-session cache so repeat calls don't re-fetch. */
+/** In-session cache so repeat calls within the same page session don't re-fetch. */
 const sessionCache = new Map<string, Map<string, ExistingRecord>>();
 
 export async function fetchExistingRecords(
@@ -34,33 +36,18 @@ export async function fetchExistingRecords(
     return sessionCache.get(did)!;
   }
 
+  signal?.throwIfAborted();
+
+  const pdsUrl = getPdsUrlFromAgent(agent);
+  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, signal);
+
   const map = new Map<string, ExistingRecord>();
-  let cursor: string | undefined;
-  let total = 0;
-  let batchSize = 50;
+  for (const rec of carRecords) {
+    const value = rec.value as unknown as PlayRecord;
+    map.set(recordKey(value), { uri: rec.uri, cid: rec.cid, value });
+  }
 
-  do {
-    signal?.throwIfAborted();
-    const res = await agent.com.atproto.repo.listRecords(
-      { repo: did, collection: RECORD_TYPE, limit: batchSize, cursor },
-      { signal }
-    );
-
-    for (const rec of res.data.records) {
-      const value = rec.value as unknown as PlayRecord;
-      const key = recordKey(value);
-      map.set(key, { uri: rec.uri, cid: rec.cid, value });
-    }
-
-    total += res.data.records.length;
-    cursor = res.data.cursor;
-    onProgress?.(total);
-
-    if (res.data.records.length === batchSize && batchSize < 100) {
-      batchSize = Math.min(100, batchSize * 2);
-    }
-  } while (cursor);
-
+  onProgress?.(map.size);
   sessionCache.set(did, map);
   return map;
 }
@@ -80,30 +67,18 @@ export async function fetchAllRecordsForDedup(
   const did = agent.did;
   if (!did) throw new Error('No authenticated session');
 
-  const all: ExistingRecord[] = [];
-  let cursor: string | undefined;
-  let batchSize = 50;
+  signal?.throwIfAborted();
 
-  do {
-    signal?.throwIfAborted();
-    const res = await agent.com.atproto.repo.listRecords(
-      { repo: did, collection: RECORD_TYPE, limit: batchSize, cursor },
-      { signal }
-    );
+  const pdsUrl = getPdsUrlFromAgent(agent);
+  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, signal);
 
-    for (const rec of res.data.records) {
-      const value = rec.value as unknown as PlayRecord;
-      all.push({ uri: rec.uri, cid: rec.cid, value });
-    }
+  const all: ExistingRecord[] = carRecords.map((rec) => ({
+    uri: rec.uri,
+    cid: rec.cid,
+    value: rec.value as unknown as PlayRecord,
+  }));
 
-    cursor = res.data.cursor;
-    onProgress?.(all.length);
-
-    if (res.data.records.length === batchSize && batchSize < 100) {
-      batchSize = Math.min(100, batchSize * 2);
-    }
-  } while (cursor);
-
+  onProgress?.(all.length);
   return all;
 }
 
@@ -143,14 +118,12 @@ export async function removeDuplicateRecords(
         );
         removed++;
         onProgress?.(removed);
-        // Short delay — cancellable via the signal
         await new Promise<void>((resolve, reject) => {
           const t = setTimeout(resolve, 100);
           signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason); }, { once: true });
         });
       } catch (err: any) {
-        if (signal?.aborted) throw err; // propagate abort
-        // otherwise continue on individual failures
+        if (signal?.aborted) throw err;
       }
     }
   }

@@ -16,11 +16,18 @@ import type { Config } from './types.js';
 // Record type
 export const RECORD_TYPE = 'fm.teal.alpha.feed.play';
 
+// Single source of truth for the CLI version string.
+// Keep in sync with package.json `version`.
+export const VERSION = '0.10.0';
+
+// Points charged per record write in ATProto applyWrites.
+export const POINTS_PER_RECORD = 3;
+
 // Build client agent string
 export function buildClientAgent(_debug = false) {
   // Always return just the version, regardless of debug mode
   // The debug parameter is kept for backwards compatibility but unused
-  return 'malachite/v0.9.3';
+  return `malachite/v${VERSION}`;
 }
 
 // DEPRECATED - These are kept for backwards compatibility only

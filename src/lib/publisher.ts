@@ -9,6 +9,7 @@ import { formatLocaleNumber } from '../utils/platform.js';
 import { generateTIDFromISO } from '../utils/tid.js';
 import type { PlayRecord, Config, PublishResult } from '../types.js';
 import { log } from '../utils/logger.js';
+import { POINTS_PER_RECORD, MAX_BATCH_SIZE as MAX_PDS_BATCH_SIZE } from '../config.js';
 import {
   ImportState,
   updateImportState,
@@ -16,16 +17,6 @@ import {
   getResumeStartIndex,
 } from '../utils/import-state.js';
 import { retryWithBackoff, isRetryableError } from '../utils/network/retry-helper.js';
-
-/**
- * Maximum operations allowed per applyWrites call (PDS hard limit)
- */
-const MAX_PDS_BATCH_SIZE = 200;
-
-/**
- * Points cost per record in ATProto
- */
-const POINTS_PER_RECORD = 3;
 
 /**
  * Publish records using PROACTIVE rate limiting - never hits rate limits

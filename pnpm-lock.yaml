@@ -14,6 +14,12 @@ importers:
       '@atproto/common-web':
         specifier: ^0.4.12
         version: 0.4.12
+      '@ipld/car':
+        specifier: ^5.3.2
+        version: 5.4.2
+      '@ipld/dag-cbor':
+        specifier: ^9.2.2
+        version: 9.2.5
       chalk:
         specifier: ^5.6.2
         version: 5.6.2
@@ -23,6 +29,9 @@ importers:
       csv-parse:
         specifier: ^6.1.0
         version: 6.1.0
+      multiformats:
+        specifier: ^13.3.1
+        version: 13.4.2
       ora:
         specifier: ^9.0.0
         version: 9.0.0
@@ -57,6 +66,14 @@ packages:
   '@atproto/xrpc@0.7.7':
     resolution: {integrity: sha512-K1ZyO/BU8JNtXX5dmPp7b5UrkLMMqpsIa/Lrj5D3Su+j1Xwq1m6QJ2XJ1AgjEjkI1v4Muzm7klianLE6XGxtmA==}
 
+  '@ipld/car@5.4.2':
+    resolution: {integrity: sha512-gfyrJvePyXnh2Fbj8mPg4JYvEZ3izhk8C9WgAle7xIYbrJNSXmNQ6BxAls8Gof97vvGbCROdxbTWRmHJtTCbcg==}
+    engines: {node: '>=16.0.0', npm: '>=7.0.0'}
+
+  '@ipld/dag-cbor@9.2.5':
+    resolution: {integrity: sha512-84wSr4jv30biui7endhobYhXBQzQE4c/wdoWlFrKcfiwH+ofaPg8fwsM8okX9cOzkkrsAsNdDyH3ou+kiLquwQ==}
+    engines: {node: '>=16.0.0', npm: '>=7.0.0'}
+
   '@types/node@20.19.27':
     resolution: {integrity: sha512-N2clP5pJhB2YnZJ3PIHFk5RkygRX5WO/5f0WC08tp0wd+sv0rsJk3MqWn3CbNmT2J505a5336jaQj4ph1AdMug==}
 
@@ -70,6 +87,10 @@ packages:
 
   await-lock@2.2.2:
     resolution: {integrity: sha512-aDczADvlvTGajTDjcjpJMqRkOF6Qdz3YbPZm/PyW6tKPkx2hlYBzxMhEywM/tU72HrVZjgl5VCdRuMlA7pZ8Gw==}
+
+  cborg@4.5.8:
+    resolution: {integrity: sha512-6/viltD51JklRhq4L7jC3zgy6gryuG5xfZ3kzpE+PravtyeQLeQmCYLREhQH7pWENg5pY4Yu/XCd6a7dKScVlw==}
+    hasBin: true
 
   chalk@5.6.2:
     resolution: {integrity: sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA==}
@@ -119,6 +140,9 @@ packages:
   mimic-function@5.0.1:
     resolution: {integrity: sha512-VP79XUPxV2CigYP3jWwAUFSku2aKqBH7uTAapFWCBqutsbmDo96KY5o8uh6U+/YSIn5OxJnXp73beVkpqMIGhA==}
     engines: {node: '>=18'}
+
+  multiformats@13.4.2:
+    resolution: {integrity: sha512-eh6eHCrRi1+POZ3dA+Dq1C6jhP1GNtr9CRINMb67OKzqW9I5DUuZM/3jLPlzhgpGeiNUlEGEbkCYChXMCc/8DQ==}
 
   multiformats@9.9.0:
     resolution: {integrity: sha512-HoMUjhH9T8DDBNT+6xzkrd9ga/XiBI4xLr58LJACwK6G3HTOPeMz4nB4KJs33L2BelrIJa7P0VuNaVF3hMYfjg==}
@@ -180,6 +204,9 @@ packages:
   unicode-segmenter@0.14.5:
     resolution: {integrity: sha512-jHGmj2LUuqDcX3hqY12Ql+uhUTn8huuxNZGq7GvtF6bSybzH3aFgedYu/KTzQStEgt1Ra2F3HxadNXsNjb3m3g==}
 
+  varint@6.0.0:
+    resolution: {integrity: sha512-cXEIW6cfr15lFv563k4GuVuW/fiwjknytD37jIOLSdSWuOI6WnO/oKwmP2FQTU2l01LP8/M5TSAJpzUaGe3uWg==}
+
   yoctocolors@2.1.2:
     resolution: {integrity: sha512-CzhO+pFNo8ajLM2d2IW/R93ipy99LWjtwblvC1RsoSUMZgyLbYFr221TnSNT7GjGdYui6P459mw9JH/g/zW2ug==}
     engines: {node: '>=18'}
@@ -234,6 +261,18 @@ snapshots:
       '@atproto/lexicon': 0.6.0
       zod: 3.25.76
 
+  '@ipld/car@5.4.2':
+    dependencies:
+      '@ipld/dag-cbor': 9.2.5
+      cborg: 4.5.8
+      multiformats: 13.4.2
+      varint: 6.0.0
+
+  '@ipld/dag-cbor@9.2.5':
+    dependencies:
+      cborg: 4.5.8
+      multiformats: 13.4.2
+
   '@types/node@20.19.27':
     dependencies:
       undici-types: 6.21.0
@@ -243,6 +282,8 @@ snapshots:
   ansi-regex@6.2.2: {}
 
   await-lock@2.2.2: {}
+
+  cborg@4.5.8: {}
 
   chalk@5.6.2: {}
 
@@ -276,6 +317,8 @@ snapshots:
       yoctocolors: 2.1.2
 
   mimic-function@5.0.1: {}
+
+  multiformats@13.4.2: {}
 
   multiformats@9.9.0: {}
 
@@ -336,6 +379,8 @@ snapshots:
   undici-types@6.21.0: {}
 
   unicode-segmenter@0.14.5: {}
+
+  varint@6.0.0: {}
 
   yoctocolors@2.1.2: {}
 
