@@ -9,7 +9,7 @@ import { parseCombinedExports } from '../lib/merge.js';
 import { publishRecordsWithApplyWrites } from './publisher.js';
 import { prompt, confirm, promptWithValidation, validateFilePath } from '../utils/input.js';
 import { sortRecords } from '../utils/helpers.js';
-import config from '../config.js';
+import config, { VERSION } from '../config.js';
 import { calculateOptimalBatchSize } from '../utils/helpers.js';
 import { fetchExistingRecords, filterNewRecords, displaySyncStats, removeDuplicates, deduplicateInputRecords } from './sync.js';
 import { Logger, LogLevel, setGlobalLogger, log } from '../utils/logger.js';
@@ -36,7 +36,7 @@ import { formatLocaleNumber } from '../utils/platform.js';
  */
 export function showHelp(): void {
   console.log(`
-${'\x1b[1m'}Malachite v0.9.3${'\x1b[0m'}
+${'\x1b[1m'}Malachite v${VERSION}${'\x1b[0m'}
 
 ${'\x1b[1m'}USAGE:${'\x1b[0m'}
   pnpm start                     Run in interactive mode (prompts for all inputs)

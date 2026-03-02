@@ -1,9 +1,9 @@
 import type { AtpAgent } from '@atproto/api';
 import type { PlayRecord, Config } from '../types.js';
+import { fetchRepoViaCAR, getPdsUrlFromAgent } from '../utils/car-fetch.js';
 import { formatDate, formatDateRange } from '../utils/helpers.js';
 import * as ui from '../utils/ui.js';
 import { log } from '../utils/logger.js';
-import { isImportCancelled } from '../utils/killswitch.js';
 import { isCacheValid, loadCache, saveCache, getCacheInfo } from '../utils/teal-cache.js';
 
 interface ExistingRecord {
@@ -18,8 +18,9 @@ interface DuplicateGroup {
 }
 
 /**
- * Fetch all existing play records from Teal
- * Returns a Map where each key can have multiple records (for duplicate detection)
+ * Fetch all existing play records from Teal via a single CAR export.
+ * Uses com.atproto.sync.getRepo (sync namespace) — separate, generous
+ * rate-limit envelope; burns zero AppView write-quota points.
  */
 export async function fetchExistingRecords(
   agent: AtpAgent,
@@ -34,146 +35,53 @@ export async function fetchExistingRecords(
     throw new Error('No authenticated session found');
   }
 
-  // Check cache first (unless force refresh)
+  // Serve from cache when valid and not forcing a refresh
   if (!forceRefresh && isCacheValid(did)) {
     const cacheInfo = getCacheInfo(did);
     log.info(`📂 Loading from cache (${cacheInfo.age!.toFixed(1)}h old, ${cacheInfo.records!.toLocaleString()} records)...`);
-    
     const cached = loadCache(did);
     if (cached) {
-      // Convert cached records to the format we need
       const existingRecords = new Map<string, ExistingRecord>();
       for (const [, record] of cached.entries()) {
         const playRecord = record.value as PlayRecord;
-        const key = createRecordKey(playRecord);
-        existingRecords.set(key, record as ExistingRecord);
+        existingRecords.set(createRecordKey(playRecord), record as ExistingRecord);
       }
-      
       log.success(`✓ Loaded ${existingRecords.size.toLocaleString()} records from cache`);
       log.blank();
       return existingRecords;
     }
   }
 
-  // Cache miss or force refresh - fetch from Teal
   if (forceRefresh) {
-    log.info('🔄 Force refresh - fetching from Teal...');
+    log.info('🔄 Force refresh — fetching repo via CAR export...');
   } else {
-    log.info('Fetching records from Teal to avoid duplicates...');
+    log.info('📦 Fetching repo via CAR export (no rate-limit points consumed)...');
   }
-  
+
+  const pdsUrl = getPdsUrlFromAgent(agent);
+  const carStart = Date.now();
+  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE);
+  const carElapsed = ((Date.now() - carStart) / 1000).toFixed(1);
+
   const existingRecords = new Map<string, ExistingRecord>();
   const cacheMap = new Map<string, { uri: string; cid: string; value: any }>();
-  let cursor: string | undefined = undefined;
-  let totalFetched = 0;
-  const startTime = Date.now();
 
-  // Adaptive batch sizing - OPTIMIZED for speed
-  let batchSize = 50; // Start with proven safe size (was 25)
-  let consecutiveFastRequests = 0;
-  let consecutiveSlowRequests = 0;
-  const TARGET_LATENCY_MS = 1500; // Target 1.5s per request (was 2s)
-  const MIN_BATCH_SIZE = 10;
-  const MAX_BATCH_SIZE = 100; // AT Protocol maximum
-  let requestCount = 0;
-
-  try {
-    // Fetch records in batches using listRecords with adaptive sizing
-    do {
-      // Check for cancellation
-      if (isImportCancelled()) {
-        log.warn('Fetch cancelled by user');
-        throw new Error('Operation cancelled by user');
-      }
-
-      requestCount++;
-      const requestStart = Date.now();
-      
-      log.debug(`Request #${requestCount}: Fetching batch of ${batchSize}...`);
-      
-      const response = await agent.com.atproto.repo.listRecords({
-        repo: did,
-        collection: RECORD_TYPE,
-        limit: batchSize,
-        cursor: cursor,
-      });
-
-      const requestLatency = Date.now() - requestStart;
-      const records = response.data.records;
-
-      log.debug(`Request #${requestCount}: Got ${records.length} records in ${requestLatency}ms`);
-
-      // Batch process records for better performance
-      for (const record of records) {
-        const playRecord = record.value as unknown as PlayRecord;
-        const key = createRecordKey(playRecord);
-        const existingRecord = {
-          uri: record.uri,
-          cid: record.cid,
-          value: playRecord,
-        };
-        existingRecords.set(key, existingRecord);
-        // Also store for cache (using URI as key for cache)
-        cacheMap.set(record.uri, existingRecord);
-      }
-
-      totalFetched += records.length;
-      cursor = response.data.cursor;
-
-      // Adaptive batch size adjustment based on latency
-      if (requestLatency < TARGET_LATENCY_MS) {
-        // Request was fast - try to increase batch size
-        consecutiveFastRequests++;
-        consecutiveSlowRequests = 0;
-
-        // OPTIMIZED: Scale up faster (2 requests instead of 3, 2x instead of 1.5x)
-        if (consecutiveFastRequests >= 2 && batchSize < MAX_BATCH_SIZE) {
-          const oldSize = batchSize;
-          batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 2.0)); // Doubled scaling factor
-          if (oldSize !== batchSize) {
-            log.info(`⚡ Fast network - doubled batch size: ${oldSize} → ${batchSize}`);
-          }
-          consecutiveFastRequests = 0;
-        }
-      } else {
-        // Request was slow - decrease batch size
-        consecutiveSlowRequests++;
-        consecutiveFastRequests = 0;
-
-        if (consecutiveSlowRequests >= 2 && batchSize > MIN_BATCH_SIZE) {
-          const oldSize = batchSize;
-          batchSize = Math.max(MIN_BATCH_SIZE, Math.floor(batchSize * 0.7));
-          log.info(`🐌 Network slow - decreased batch size: ${oldSize} → ${batchSize}`);
-          consecutiveSlowRequests = 0;
-        }
-      }
-
-      // Show progress on every batch
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      const rate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
-      log.progress(`Fetched ${totalFetched.toLocaleString()} records (${rate} rec/s, batch: ${batchSize}, ${elapsed}s)...`);
-    } while (cursor);
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const avgRate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
-    log.success(`Found ${existingRecords.size.toLocaleString()} existing records in ${elapsed}s (avg ${avgRate} rec/s)`);
-    
-    // Save to cache
-    log.debug('Saving records to cache...');
-    saveCache(did, cacheMap);
-    
-    log.blank();
-    return existingRecords;
-  } catch (error) {
-    const err = error as Error;
-    log.error(`Failed to fetch existing records: ${err.message}`);
-    throw error;
+  for (const rec of carRecords) {
+    const playRecord = rec.value as PlayRecord;
+    const entry = { uri: rec.uri, cid: rec.cid, value: playRecord };
+    existingRecords.set(createRecordKey(playRecord), entry);
+    cacheMap.set(rec.uri, entry);
   }
+
+  log.success(`✓ Loaded ${existingRecords.size.toLocaleString()} records via CAR in ${carElapsed}s`);
+  saveCache(did, cacheMap);
+  log.blank();
+  return existingRecords;
 }
 
 /**
- * Fetch all existing play records as an array (for duplicate detection)
- * This version keeps ALL records, including duplicates
+ * Fetch ALL existing play records as an array (including duplicates) via CAR export.
+ * Used by the deduplicate flow.
  */
 export async function fetchAllRecords(
   agent: AtpAgent,
@@ -186,133 +94,51 @@ export async function fetchAllRecords(
     throw new Error('No authenticated session found');
   }
 
-  ui.startSpinner('Fetching existing records from Teal...');
-  const allRecords: ExistingRecord[] = [];
-  let cursor: string | undefined = undefined;
-  let totalFetched = 0;
-  const startTime = Date.now();
+  ui.startSpinner('📦 Fetching repo via CAR export...');
 
-  // Adaptive batch sizing - OPTIMIZED for speed
-  let batchSize = 50; // Start with proven safe size (was 25)
-  let consecutiveFastRequests = 0;
-  let consecutiveSlowRequests = 0;
-  const TARGET_LATENCY_MS = 1500; // Target 1.5s per request (was 2s)
-  const MIN_BATCH_SIZE = 10;
-  const MAX_BATCH_SIZE = 100; // AT Protocol maximum
-  let requestCount = 0;
+  const pdsUrl = getPdsUrlFromAgent(agent);
+  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE);
+  const allRecords: ExistingRecord[] = carRecords.map((rec) => ({
+    uri: rec.uri,
+    cid: rec.cid,
+    value: rec.value as PlayRecord,
+  }));
 
-  try {
-    // Fetch records in batches using listRecords with adaptive sizing
-    do {
-      // Check for cancellation
-      if (isImportCancelled()) {
-        ui.failSpinner('Fetch cancelled by user');
-        throw new Error('Operation cancelled by user');
-      }
-
-      requestCount++;
-      const requestStart = Date.now();
-
-      const response = await agent.com.atproto.repo.listRecords({
-        repo: did,
-        collection: RECORD_TYPE,
-        limit: batchSize,
-        cursor: cursor,
-      });
-
-      const requestLatency = Date.now() - requestStart;
-      const records = response.data.records;
-      for (const record of records) {
-        const playRecord = record.value as unknown as PlayRecord;
-        allRecords.push({
-          uri: record.uri,
-          cid: record.cid,
-          value: playRecord,
-        });
-      }
-
-      totalFetched += records.length;
-      cursor = response.data.cursor;
-
-      // Adaptive batch size adjustment based on latency
-      if (requestLatency < TARGET_LATENCY_MS) {
-        // Request was fast - try to increase batch size
-        consecutiveFastRequests++;
-        consecutiveSlowRequests = 0;
-
-        // OPTIMIZED: Scale up faster (2 requests instead of 3, 2x instead of 1.5x)
-        if (consecutiveFastRequests >= 2 && batchSize < MAX_BATCH_SIZE) {
-        batchSize = Math.min(MAX_BATCH_SIZE, Math.floor(batchSize * 2.0)); // Doubled scaling factor
-          consecutiveFastRequests = 0;
-      }
-      } else {
-        // Request was slow - decrease batch size
-        consecutiveSlowRequests++;
-        consecutiveFastRequests = 0;
-
-        if (consecutiveSlowRequests >= 2 && batchSize > MIN_BATCH_SIZE) {
-          batchSize = Math.max(MIN_BATCH_SIZE, Math.floor(batchSize * 0.7));
-          consecutiveSlowRequests = 0;
-        }
-      }
-
-      // Update spinner with progress more frequently
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      const rate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
-      ui.updateSpinner(`Fetching records... ${totalFetched.toLocaleString()} found (${rate} rec/s, batch: ${batchSize}, ${elapsed}s)`);
-    } while (cursor);
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const avgRate = (totalFetched / (Date.now() - startTime) * 1000).toFixed(0);
-    ui.succeedSpinner(`Found ${allRecords.length.toLocaleString()} total records in ${elapsed}s (avg ${avgRate} rec/s)`);
-    return allRecords;
-  } catch (error) {
-    ui.failSpinner('Failed to fetch existing records');
-    throw error;
-  }
+  ui.succeedSpinner(`Found ${allRecords.length.toLocaleString()} records via CAR`);
+  return allRecords;
 }
 
 /**
- * Create a unique key for a play record based on its essential properties
- * This is used to identify duplicates
+ * Create a unique key for a play record based on its essential properties.
  */
 export function createRecordKey(record: PlayRecord): string {
-  const artist = record.artists[0]?.artistName || '';
-  const track = record.trackName;
-  const timestamp = record.playedTime;
-
-  // Normalize strings to handle case and whitespace differences
-  const normalizedArtist = artist.toLowerCase().trim();
-  const normalizedTrack = track.toLowerCase().trim();
-
-  return `${normalizedArtist}|||${normalizedTrack}|||${timestamp}`;
+  const artist = (record.artists[0]?.artistName ?? '').toLowerCase().trim();
+  const track = record.trackName.toLowerCase().trim();
+  return `${artist}|||${track}|||${record.playedTime}`;
 }
 
 /**
- * Deduplicate input records before submission
- * Keeps the first occurrence of each duplicate
+ * Deduplicate input records before submission.
+ * Keeps the first occurrence of each duplicate.
  */
 export function deduplicateInputRecords(records: PlayRecord[]): { unique: PlayRecord[]; duplicates: number } {
   const seen = new Map<string, PlayRecord>();
-  const duplicates: PlayRecord[] = [];
+  let duplicates = 0;
 
   for (const record of records) {
     const key = createRecordKey(record);
     if (!seen.has(key)) {
       seen.set(key, record);
     } else {
-      duplicates.push(record);
+      duplicates++;
     }
   }
 
-  return {
-    unique: Array.from(seen.values()),
-    duplicates: duplicates.length
-  };
+  return { unique: Array.from(seen.values()), duplicates };
 }
 
 /**
- * Filter out records that already exist in Teal
+ * Filter out records that already exist in Teal.
  */
 export function filterNewRecords(
   lastfmRecords: PlayRecord[],
@@ -324,8 +150,7 @@ export function filterNewRecords(
   const duplicates: PlayRecord[] = [];
 
   for (const record of lastfmRecords) {
-    const key = createRecordKey(record);
-    if (existingRecords.has(key)) {
+    if (existingRecords.has(createRecordKey(record))) {
       duplicates.push(record);
     } else {
       newRecords.push(record);
@@ -337,8 +162,7 @@ export function filterNewRecords(
   log.info(`New: ${newRecords.length.toLocaleString()} to import`);
   log.blank();
 
-  // Show some examples of duplicates if any (only in verbose mode)
-  if (log.getLevel() <= 0 && duplicates.length > 0) { // DEBUG level
+  if (log.getLevel() <= 0 && duplicates.length > 0) {
     const exampleCount = Math.min(3, duplicates.length);
     log.debug('Examples of existing records (skipped):');
     duplicates.slice(0, exampleCount).forEach((record, i) => {
@@ -355,22 +179,19 @@ export function filterNewRecords(
 }
 
 /**
- * Get time range of records
+ * Get time range of records.
  */
 export function getRecordTimeRange(records: PlayRecord[]): { earliest: Date; latest: Date } | null {
-  if (records.length === 0) {
-    return null;
-  }
-
+  if (records.length === 0) return null;
   const times = records.map(r => new Date(r.playedTime).getTime());
-  const earliest = new Date(Math.min(...times));
-  const latest = new Date(Math.max(...times));
-
-  return { earliest, latest };
+  return {
+    earliest: new Date(Math.min(...times)),
+    latest: new Date(Math.max(...times)),
+  };
 }
 
 /**
- * Display sync statistics
+ * Display sync statistics.
  */
 export function displaySyncStats(
   lastfmRecords: PlayRecord[],
@@ -401,36 +222,27 @@ export function displaySyncStats(
 }
 
 /**
- * Find duplicate records in the existing records
- * Returns groups of duplicates (where each group has 2+ records with the same key)
+ * Find duplicate records in the existing records.
+ * Returns groups of duplicates (each group has 2+ records with the same key).
  */
-export function findDuplicates(
-  allRecords: ExistingRecord[]
-): DuplicateGroup[] {
+export function findDuplicates(allRecords: ExistingRecord[]): DuplicateGroup[] {
   const keyGroups = new Map<string, ExistingRecord[]>();
-  
-  // Group records by their key
+
   for (const record of allRecords) {
     const key = createRecordKey(record.value);
-    if (!keyGroups.has(key)) {
-      keyGroups.set(key, []);
-    }
+    if (!keyGroups.has(key)) keyGroups.set(key, []);
     keyGroups.get(key)!.push(record);
   }
-  
-  // Filter to only groups with duplicates (2+ records)
+
   const duplicates: DuplicateGroup[] = [];
   for (const [key, records] of keyGroups) {
-    if (records.length > 1) {
-      duplicates.push({ key, records });
-    }
+    if (records.length > 1) duplicates.push({ key, records });
   }
-  
   return duplicates;
 }
 
 /**
- * Remove duplicate records from Teal, keeping only the first occurrence
+ * Remove duplicate records from Teal, keeping only the first occurrence.
  */
 export async function removeDuplicates(
   agent: AtpAgent,
@@ -438,27 +250,24 @@ export async function removeDuplicates(
   dryRun: boolean = false
 ): Promise<{ totalDuplicates: number; recordsRemoved: number }> {
   ui.header('Checking for Duplicate Records');
-  
-  // Fetch ALL records (including duplicates)
+
   const allRecords = await fetchAllRecords(agent, config);
-  
+
   ui.startSpinner('Analyzing records for duplicates...');
   const duplicateGroups = findDuplicates(allRecords);
-  
+
   if (duplicateGroups.length === 0) {
     ui.succeedSpinner('No duplicates found!');
     return { totalDuplicates: 0, recordsRemoved: 0 };
   }
-  
+
   ui.stopSpinner();
-  
-  // Count total duplicate records (excluding the one we keep per group)
+
   const totalDuplicates = duplicateGroups.reduce((sum, group) => sum + (group.records.length - 1), 0);
-  
+
   ui.warning(`Found ${duplicateGroups.length.toLocaleString()} duplicate groups (${totalDuplicates.toLocaleString()} records to remove)`);
   console.log('');
-  
-  // Show examples
+
   const exampleCount = Math.min(5, duplicateGroups.length);
   ui.subheader('Examples of Duplicates:');
   for (let i = 0; i < exampleCount; i++) {
@@ -467,28 +276,23 @@ export async function removeDuplicates(
     console.log(`  ${i + 1}. ${firstRecord.artists[0]?.artistName} - ${firstRecord.trackName}`);
     console.log(`     ${formatDate(firstRecord.playedTime, true)} · ${group.records.length - 1} duplicate(s)`);
   }
-  
   if (duplicateGroups.length > exampleCount) {
     console.log(`     ... and ${duplicateGroups.length - exampleCount} more groups`);
   }
   console.log('');
-  
+
   if (dryRun) {
     ui.info('DRY RUN: No records were removed.');
     return { totalDuplicates, recordsRemoved: 0 };
   }
-  
-  // Remove duplicates (keep first, delete rest)
+
   console.log('');
   const progressBar = ui.createProgressBar(totalDuplicates, 'Removing duplicates');
   let recordsRemoved = 0;
   const startTime = Date.now();
-  
+
   for (const group of duplicateGroups) {
-    // Keep the first record, delete the rest
-    const toDelete = group.records.slice(1);
-    
-    for (const record of toDelete) {
+    for (const record of group.records.slice(1)) {
       try {
         await agent.com.atproto.repo.deleteRecord({
           repo: agent.session?.did || '',
@@ -496,25 +300,19 @@ export async function removeDuplicates(
           rkey: record.uri.split('/').pop()!,
         });
         recordsRemoved++;
-        
-        // Update progress bar
         const elapsed = (Date.now() - startTime) / 1000;
-        const speed = recordsRemoved / Math.max(elapsed, 0.1);
-        progressBar.update(recordsRemoved, { speed });
-        
-      } catch (error) {
-        // Silently continue on errors
+        progressBar.update(recordsRemoved, { speed: recordsRemoved / Math.max(elapsed, 0.1) });
+      } catch {
+        // continue on individual failures
       }
-      
-      // Small delay between deletions
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
-  
+
   progressBar.stop();
   console.log('');
   ui.success(`Removed ${recordsRemoved.toLocaleString()} duplicate records`);
   ui.info(`Kept ${duplicateGroups.length.toLocaleString()} unique records`);
-  
+
   return { totalDuplicates, recordsRemoved };
 }
