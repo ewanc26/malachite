@@ -2,105 +2,140 @@
 
 Zero-dependency [AT Protocol](https://atproto.com/) TID (Timestamp Identifier) generation for Node.js and browsers.
 
-TIDs are the record keys used throughout ATProto / Bluesky — 13-character, lexicographically sortable, monotonic identifiers derived from a microsecond timestamp and a random clock ID.
+This package is **written in TypeScript** and compiled to **plain JavaScript**, so it ships with type definitions for TypeScript users and runs anywhere the Web Crypto API is available — Node.js 20+, Deno, Bun, and modern browsers.
+
+TIDs are 13-character, lexicographically sortable record keys used across the AT Protocol and Bluesky. They’re monotonic identifiers derived from a microsecond timestamp and a 5-bit clock ID. When multiple TIDs would otherwise share the same microsecond, this package avoids collisions by nudging the clock ID (initialised per JS context) so each generated TID stays unique and strictly increasing within that runtime.
+
+---
 
 ## Why this package?
 
-Other TID implementations require native bindings (`node-gyp`, Python) or pull in large dependency trees. This package is **pure JavaScript** with **no runtime dependencies**, and runs anywhere the [Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API) is available — Node.js 20+, Deno, Bun, and all modern browsers.
+Other TID implementations either require native bindings (e.g. `node-gyp`) or pull in large dependency trees. This package is **pure JavaScript**, has **no runtime dependencies**, ships with `.d.ts` typings, and is intentionally tiny — ideal for libraries, servers and client code where bundle size and portability matter.
+
+---
 
 ## Install
 
-```sh
+```bash
 npm install @ewanc26/tid
 # or
 pnpm add @ewanc26/tid
 ```
 
+---
+
 ## Usage
 
-### Generate a TID for a historical timestamp
-
-Pass an ISO 8601 string or a `Date` object. The clock is monotonic — if records arrive out of order, the timestamp is bumped forward so every call produces a strictly increasing TID within the same JS context.
+### TypeScript (recommended)
 
 ```ts
-import { generateTID } from '@ewanc26/tid';
+import {
+  generateTID,
+  generateNextTID,
+  validateTid,
+  decodeTid,
+  compareTids,
+} from '@ewanc26/tid';
 
-// From an ISO string (e.g. a Last.fm scrobble timestamp)
-const tid = generateTID('2023-11-01T12:00:00Z');
+// From ISO string or Date
+const tid: string = generateTID('2023-11-01T12:00:00Z');
+const tid2: string = generateTID(new Date('2024-03-15T09:30:00Z'));
 
-// From a Date object
-const tid2 = generateTID(new Date('2024-03-15T09:30:00Z'));
-```
+// Now
+const currentTid: string = generateNextTID();
 
-### Generate a TID for right now
+// Validate
+const ok: boolean = validateTid('3jzfcijpj2z2a');
 
-```ts
-import { generateNextTID } from '@ewanc26/tid';
+// Decode
+const decoded = decodeTid('3jzfcijpj2z2a');
+console.log(decoded.timestampUs, decoded.clockId, decoded.date);
 
-const tid = generateNextTID();
-```
-
-### Validate a TID
-
-```ts
-import { validateTid } from '@ewanc26/tid';
-
-validateTid('3jzfcijpj2z2a');  // true
-validateTid('not-a-tid');       // false
-```
-
-### Decode a TID
-
-```ts
-import { decodeTid } from '@ewanc26/tid';
-
-const { timestampUs, clockId, date } = decodeTid('3jzfcijpj2z2a');
-// timestampUs — microseconds since Unix epoch
-// clockId     — random 0–31 clock identifier
-// date        — equivalent JavaScript Date (millisecond precision)
-```
-
-### Compare / sort TIDs
-
-Because the AT Protocol base-32 alphabet is ordered by timestamp, lexicographic string comparison is correct. `compareTids` returns `-1 | 0 | 1` for use as a `sort` comparator.
-
-```ts
-import { compareTids } from '@ewanc26/tid';
-
-const tids = ['3jzfcijpj2z2a', '3jzfabc000022', '3jzfzzzzzzz2a'];
+// Sort
+const tids: string[] = ['3jzfcijpj2z2a', '3jzfabc000022', '3jzfzzzzzzz2a'];
 tids.sort(compareTids);
-// → ['3jzfabc000022', '3jzfcijpj2z2a', '3jzfzzzzzzz2a']  (chronological)
 ```
+
+### JavaScript (ESM)
+
+```js
+import {
+  generateTID,
+  generateNextTID,
+  validateTid,
+  decodeTid,
+  compareTids,
+} from '@ewanc26/tid';
+
+const tid = generateTID('2023-11-01T12:00:00Z');
+const currentTid = generateNextTID();
+console.log(validateTid(tid));
+```
+
+### JavaScript (CommonJS)
+
+```js
+const {
+  generateTID,
+  generateNextTID,
+  validateTid,
+  decodeTid,
+  compareTids,
+} = require('@ewanc26/tid');
+
+const tid = generateTID('2023-11-01T12:00:00Z');
+```
+
+---
 
 ## API
 
-| Export | Signature | Description |
-|--------|-----------|-------------|
-| `generateTID` | `(source: string \| Date) => string` | Generate a TID for a historical timestamp |
-| `generateNextTID` | `() => string` | Generate a TID for the current wall-clock time |
-| `validateTid` | `(tid: string) => boolean` | Returns `true` if the string is a well-formed TID |
-| `decodeTid` | `(tid: string) => DecodedTid` | Decode a TID into timestamp, clockId, and Date |
-| `compareTids` | `(a: string, b: string) => -1 \| 0 \| 1` | Lexicographic comparator for sorting |
-| `resetTidClock` | `() => void` | Reset the monotonic clock (**tests only**) |
+| Export            | Signature                     | Description                                       |                                           |                                      |
+| ----------------- | ----------------------------- | ------------------------------------------------- | ----------------------------------------- | ------------------------------------ |
+| `generateTID`     | `(source: string              | Date) => string`                                  | Generate a TID for a historical timestamp |                                      |
+| `generateNextTID` | `() => string`                | Generate a TID for the current wall-clock time    |                                           |                                      |
+| `validateTid`     | `(tid: string) => boolean`    | Returns `true` if the string is a well-formed TID |                                           |                                      |
+| `decodeTid`       | `(tid: string) => DecodedTid` | Decode a TID into timestamp, clockId, and Date    |                                           |                                      |
+| `compareTids`     | `(a: string, b: string) => -1 | 0                                                 | 1`                                        | Lexicographic comparator for sorting |
+| `resetTidClock`   | `() => void`                  | Reset the monotonic clock (**tests only**)        |                                           |                                      |
 
 ### `DecodedTid`
 
 ```ts
 interface DecodedTid {
-  timestampUs: number;  // microseconds since Unix epoch
-  clockId: number;      // 0–31
-  date: Date;           // millisecond-precision equivalent
+  timestampUs: number; // microseconds since Unix epoch
+  clockId: number;     // 0–31
+  date: Date;          // millisecond-precision equivalent
 }
 ```
 
+---
+
 ## Spec notes
 
-- TIDs are 13 characters in the AT Protocol base-32 alphabet (`234567abcdefghijklmnopqrstuvwxyz`).
-- The first 11 characters encode a microsecond-precision Unix timestamp.
-- The last 2 characters encode a random clock ID (0–31) that disambiguates TIDs generated on different machines or in different processes within the same microsecond.
-- The clock ID is randomised once at module load time (per JS context).
-- The full specification is at <https://atproto.com/specs/tid>.
+* TIDs are 13 characters in the AT Protocol base-32 alphabet: `234567abcdefghijklmnopqrstuvwxyz`.
+* The first 11 characters encode a microsecond-precision Unix timestamp.
+* The last 2 characters encode a 5-bit clock ID (0–31) which disambiguates TIDs generated on different machines or processes within the same microsecond.
+* The clock ID is randomised once at module load time (per JS context). When multiple TIDs would collide at the same microsecond, the implementation adjusts (nudges) the clock ID so collisions are avoided while preserving lexicographic ordering and monotonicity within that runtime.
+* Full specification: [https://atproto.com/specs/tid](https://atproto.com/specs/tid)
 
-## License
+---
 
-AGPL-3.0-only — same as [Malachite](https://github.com/ewanc26/malachite).
+## Behavioural notes
+
+* Monotonicity is maintained per JS context. If records arrive out of chronological order in the same runtime, the package bumps the timestamp forward to ensure every generated TID is strictly increasing.
+* Clock ID collisions across processes or machines are extremely unlikely due to the randomised 5-bit clock ID; the clock-nudging only applies inside a JS context to disambiguate simultaneous generations.
+* The package does not attempt cross-process coordination — if you need globally unique sequencing beyond the TID spec, consider a server-side sequencer or combining TIDs with per-host identifiers.
+
+---
+
+## Testing & development
+
+* `resetTidClock()` is exported for tests to make deterministic TID generation possible.
+* The library has zero runtime deps and uses the Web Crypto API for secure randomness. When running in older environments, provide a compatible Web Crypto polyfill if necessary.
+
+---
+
+## Licence
+
+AGPL-3.0-only — same as [Malachite](https://github.com/ewanc26/malachite/tree/main).

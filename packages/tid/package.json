@@ -1,6 +1,6 @@
 {
   "name": "@ewanc26/tid",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Zero-dependency AT Protocol TID generation for Node.js and browsers",
   "type": "module",
   "exports": {
