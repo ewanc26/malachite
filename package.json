@@ -34,7 +34,7 @@
     "import",
     "typescript"
   ],
-  "author": "",
+  "author": "Ewan Croft",
   "license": "AGPL-3.0-only",
   "dependencies": {
     "@atproto/api": "^0.18.13",
