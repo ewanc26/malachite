@@ -1,133 +1,68 @@
-import { AtpAgent } from '@atproto/api';
+/**
+ * CLI authentication wrapper.
+ * Adds terminal prompts and credential persistence on top of the core login.
+ */
+
+import type { Agent } from '@atproto/api';
+import { login as coreLogin, resolveIdentity } from '../core/auth.js';
 import { prompt } from '../utils/input.js';
 import * as ui from '../utils/ui.js';
 import { saveCredentials } from '../utils/credentials.js';
 
-interface ResolvedIdentity {
-  did: string;
-  handle: string;
-  pds: string;
-  signing_key: string;
-}
+export { resolveIdentity };
 
 /**
- * Resolves an AT Protocol identifier (handle or DID) to get PDS information
- */
-async function resolveIdentifier(identifier: string, resolverBase: string): Promise<ResolvedIdentity> {
-  ui.startSpinner(`Resolving identifier: ${identifier}`);
-
-  try {
-    const response = await fetch(
-      `${resolverBase}/xrpc/com.bad-example.identity.resolveMiniDoc?identifier=${encodeURIComponent(identifier)}`
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to resolve identifier: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json() as ResolvedIdentity;
-
-    if (!data.did || !data.pds) {
-      throw new Error('Invalid response from identity resolver');
-    }
-
-    ui.succeedSpinner(`Resolved to PDS: ${data.pds}`);
-    return data;
-  } catch (error) {
-    ui.failSpinner('Failed to resolve identifier');
-    throw error;
-  }
-}
-
-/**
- * Login to ATProto using Slingshot resolver
+ * CLI-aware login: prompts for missing credentials, surfaces progress via
+ * spinners, and automatically persists credentials on success.
  */
 export async function login(
   identifier: string | undefined,
   password: string | undefined,
-  resolverOrPds?: string // If this contains the Slingshot resolver base, it will be used to resolve; otherwise treated as a PDS override URL
-): Promise<AtpAgent> {
+  resolverOrPds?: string
+): Promise<Agent> {
   ui.header('ATProto Login');
-  
-  // Prompt for missing credentials
+
   if (!identifier) {
     identifier = await prompt('Handle or DID: ');
   } else {
     ui.keyValue('Handle or DID', identifier);
   }
-  
+
   if (!password) {
     password = await prompt('App password: ', true);
   } else {
     ui.keyValue('App password', '[hidden]');
   }
-  
+
   console.log('');
-  
+
+  // If resolverOrPds looks like a direct PDS URL (not Slingshot), use it as-is.
+  const isSlingshot = !resolverOrPds || resolverOrPds.includes('slingshot');
+  const pdsOverride = resolverOrPds && !isSlingshot ? resolverOrPds : undefined;
+
   try {
-    // If resolverOrPds is provided and does NOT look like the Slingshot resolver,
-    // treat it as a PDS override and skip identity resolution.
-    const isSlingshot = resolverOrPds?.includes('slingshot') ?? false;
+    ui.startSpinner(pdsOverride ? `Using provided PDS: ${pdsOverride}` : 'Resolving identity…');
 
-    if (resolverOrPds && !isSlingshot) {
-      ui.startSpinner(`Using provided PDS: ${resolverOrPds}`);
-      const agent = new AtpAgent({ service: resolverOrPds });
-      await agent.login({ identifier: identifier!, password: password });
-      ui.succeedSpinner('Logged in successfully (PDS override)!');
-      ui.keyValue('DID', agent.session?.did || 'unknown');
-      ui.keyValue('Handle', agent.session?.handle || 'unknown');
-      
-      // Automatically save credentials (encrypted with SHA-512, machine-specific)
-      try {
-        saveCredentials(identifier, password);
-        ui.info('Credentials saved securely (SHA-512 encrypted, machine-specific)');
-      } catch (err) {
-        // Non-fatal - log but continue
-        ui.warning('Failed to save credentials - you may need to re-enter them next time');
-      }
-      
-      console.log('');
-      return agent;
-    }
-
-    // Otherwise use the resolver (provided or default) to resolve identifier
-    const resolverBase = resolverOrPds || 'https://slingshot.microcosm.blue';
-    const resolved = await resolveIdentifier(identifier, resolverBase);
-
-    // Initialize the agent with the resolved PDS URL
-    ui.startSpinner('Logging in...');
-    const agent = new AtpAgent({
-      service: resolved.pds,
-    });
-
-    // Attempt to login using the resolved DID for more reliable authentication
-    await agent.login({
-      identifier: resolved.did,
-      password: password,
-    });
+    const agent = await coreLogin(identifier!, password!, pdsOverride);
 
     ui.succeedSpinner('Logged in successfully!');
-    ui.keyValue('DID', agent.session?.did || 'unknown');
-    ui.keyValue('Handle', agent.session?.handle || 'unknown');
-    
-    // Automatically save credentials (encrypted with SHA-512, machine-specific)
-    try {
-      saveCredentials(identifier, password);
-      ui.info('Credentials saved securely (SHA-512 encrypted, machine-specific)');
-    } catch (err) {
-      // Non-fatal - log but continue
-      ui.warning('Failed to save credentials - you may need to re-enter them next time');
-    }
-    
-    console.log('');
+    ui.keyValue('DID', (agent as any).session?.did || (agent as any).did || 'unknown');
+    ui.keyValue('Handle', (agent as any).session?.handle || 'unknown');
 
+    try {
+      saveCredentials(identifier!, password!);
+      ui.info('Credentials saved securely');
+    } catch {
+      ui.warning('Failed to save credentials — you may need to re-enter them next time');
+    }
+
+    console.log('');
     return agent;
   } catch (error) {
     const err = error as Error;
     ui.failSpinner('Login failed');
-    
-    // Provide more specific error messages
-    if (err.message.includes('Failed to resolve identifier')) {
+
+    if (err.message.includes('Failed to resolve identity')) {
       throw new Error('Handle not found. Please check your AT Protocol handle.');
     } else if (err.message.includes('AuthFactorTokenRequired')) {
       throw new Error('Two-factor authentication required. Please use your app password.');
