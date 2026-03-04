@@ -1,0 +1,41 @@
+{
+  "name": "@ewanc26/tid",
+  "version": "1.0.1",
+  "description": "Zero-dependency AT Protocol TID generation for Node.js and browsers",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENCE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "type-check": "tsc --noEmit",
+    "test": "node --test dist/index.test.js"
+  },
+  "keywords": [
+    "atproto",
+    "bluesky",
+    "tid",
+    "timestamp",
+    "identifier",
+    "lexicon"
+  ],
+  "author": "",
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3"
+  }
+}
