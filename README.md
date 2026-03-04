@@ -814,12 +814,7 @@ The lexicon defines required and optional field types, string length constraints
 
 ## Contributing
 
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, architecture notes, and PR guidelines.
 
 ## License
 
