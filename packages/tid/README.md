@@ -23,7 +23,7 @@ pnpm add @ewanc26/tid
 Pass an ISO 8601 string or a `Date` object. The clock is monotonic — if records arrive out of order, the timestamp is bumped forward so every call produces a strictly increasing TID within the same JS context.
 
 ```ts
-import { generateTID } from '@malachite/tid';
+import { generateTID } from '@ewanc26/tid';
 
 // From an ISO string (e.g. a Last.fm scrobble timestamp)
 const tid = generateTID('2023-11-01T12:00:00Z');
@@ -35,7 +35,7 @@ const tid2 = generateTID(new Date('2024-03-15T09:30:00Z'));
 ### Generate a TID for right now
 
 ```ts
-import { generateNextTID } from '@malachite/tid';
+import { generateNextTID } from '@ewanc26/tid';
 
 const tid = generateNextTID();
 ```
@@ -43,7 +43,7 @@ const tid = generateNextTID();
 ### Validate a TID
 
 ```ts
-import { validateTid } from '@malachite/tid';
+import { validateTid } from '@ewanc26/tid';
 
 validateTid('3jzfcijpj2z2a');  // true
 validateTid('not-a-tid');       // false
@@ -52,7 +52,7 @@ validateTid('not-a-tid');       // false
 ### Decode a TID
 
 ```ts
-import { decodeTid } from '@malachite/tid';
+import { decodeTid } from '@ewanc26/tid';
 
 const { timestampUs, clockId, date } = decodeTid('3jzfcijpj2z2a');
 // timestampUs — microseconds since Unix epoch
@@ -65,7 +65,7 @@ const { timestampUs, clockId, date } = decodeTid('3jzfcijpj2z2a');
 Because the AT Protocol base-32 alphabet is ordered by timestamp, lexicographic string comparison is correct. `compareTids` returns `-1 | 0 | 1` for use as a `sort` comparator.
 
 ```ts
-import { compareTids } from '@malachite/tid';
+import { compareTids } from '@ewanc26/tid';
 
 const tids = ['3jzfcijpj2z2a', '3jzfabc000022', '3jzfzzzzzzz2a'];
 tids.sort(compareTids);

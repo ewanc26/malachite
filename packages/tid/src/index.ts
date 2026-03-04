@@ -1,5 +1,5 @@
 /**
- * @malachite/tid — AT Protocol TID generation
+ * @ewanc26/tid — AT Protocol TID generation
  *
  * Zero-dependency, spec-compliant TID (Timestamp Identifier) generation for
  * the AT Protocol. Works in Node.js 20+ and all modern browsers.
