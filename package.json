@@ -1,6 +1,6 @@
 {
   "name": "malachite",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Malachite - Import Last.fm and Spotify listening history to ATProto with intelligent deduplication and rate limiting",
   "type": "module",
   "main": "./dist/index.js",
@@ -8,8 +8,14 @@
   "bin": {
     "malachite": "./dist/index.js"
   },
+  "workspaces": [
+    "packages/*",
+    "web"
+  ],
   "scripts": {
     "build": "tsc",
+    "build:packages": "pnpm --filter './packages/*' build",
+    "build:all": "pnpm run build:packages && pnpm run build",
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js",
     "dry-run": "npm run build && node dist/index.js --dry-run",

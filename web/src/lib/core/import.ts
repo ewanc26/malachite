@@ -1,21 +1,26 @@
 /**
  * Import orchestration logic — pure TypeScript, no Svelte deps.
  * Handles all five ImportMode flows with progress + cancellation callbacks.
+ *
+ * All heavy logic (publisher, sync, merge) lives in src/core/ and is shared
+ * with the CLI. Only the browser File-loading helpers and this orchestrator
+ * are web-specific.
  */
 
 import type { Agent } from '@atproto/api';
-import type { ImportMode, LogEntry, PlayRecord } from '../types.js';
+import type { ImportMode, LogEntry, PlayRecord } from '$core/types.js';
+import { CLIENT_AGENT } from '../config.js';
 import { parseLastFmFile, convertToPlayRecord } from './csv.js';
 import { parseSpotifyFiles, convertSpotifyToPlayRecord } from './spotify.js';
-import { mergePlayRecords, deduplicateInputRecords, sortRecords } from './merge.js';
+import { mergePlayRecords, deduplicateInputRecords, sortRecords } from '$core/merge.js';
 import {
   fetchExistingRecords,
   filterNewRecords,
   fetchAllRecordsForDedup,
   findDuplicateGroups,
   removeDuplicateRecords,
-} from './sync.js';
-import { publishRecords, type PublishProgress } from './publisher.js';
+} from '$core/sync.js';
+import { publishRecords, type PublishProgress } from '$core/publisher.js';
 
 export type { PublishProgress };
 
@@ -46,13 +51,10 @@ export async function runImport(
   { onLog, onProgress, isCancelled }: ImportCallbacks,
 ): Promise<ImportResult> {
   // Single AbortController for every network call in this run.
-  // A 50 ms poll drives it from isCancelled so all awaited fetches are cut off
-  // immediately — even mid-page-fetch — without callers needing to know about it.
   const ac = new AbortController();
   const poll = setInterval(() => { if (isCancelled()) ac.abort(); }, 50);
   const sig = ac.signal;
 
-  // Wrap every abort error into a clean cancelled result.
   const run = async (): Promise<ImportResult> => {
     // ── Deduplicate mode ─────────────────────────────────────────────────────
     if (mode === 'deduplicate') {
@@ -100,18 +102,18 @@ export async function runImport(
       const spRaw = await parseSpotifyFiles(spotifyFiles);
       onLog('info', `Spotify: ${spRaw.length.toLocaleString()} tracks`);
       const { merged, stats } = mergePlayRecords(
-        lfRaw.map((r) => convertToPlayRecord(r)),
-        spRaw.map((r) => convertSpotifyToPlayRecord(r)),
+        lfRaw.map((r) => convertToPlayRecord(r, CLIENT_AGENT)),
+        spRaw.map((r) => convertSpotifyToPlayRecord(r, CLIENT_AGENT)),
       );
       records = merged;
       onLog('success', `Merged: ${stats.mergedTotal.toLocaleString()} unique records (${stats.duplicatesRemoved} removed)`);
     } else if (mode === 'spotify') {
       const spRaw = await parseSpotifyFiles(spotifyFiles);
-      records = spRaw.map((r) => convertSpotifyToPlayRecord(r));
+      records = spRaw.map((r) => convertSpotifyToPlayRecord(r, CLIENT_AGENT));
       onLog('success', `Loaded ${records.length.toLocaleString()} Spotify records`);
     } else {
       const lfRaw = await parseLastFmFile(lastfmFiles[0]);
-      records = lfRaw.map((r) => convertToPlayRecord(r));
+      records = lfRaw.map((r) => convertToPlayRecord(r, CLIENT_AGENT));
       onLog('success', `Loaded ${records.length.toLocaleString()} Last.fm records`);
     }
 
@@ -142,6 +144,7 @@ export async function runImport(
 
     // ── Publish ──────────────────────────────────────────────────────────────
     onLog('section', '── Publishing ───────────────────────────────────────');
+    onLog('warn', 'Do not close this tab while publishing.');
     const res = await publishRecords(agent, records, dryRun, {
       onProgress,
       onLog: (level, msg) => onLog(level as LogEntry['level'], msg),
@@ -152,7 +155,7 @@ export async function runImport(
 
   try {
     return await run();
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (ac.signal.aborted) return { success: 0, errors: 0, cancelled: true };
     throw err;
   } finally {

@@ -1,6 +1,6 @@
 import type { AtpAgent } from '@atproto/api';
 import type { PlayRecord, Config } from '../types.js';
-import { fetchRepoViaCAR, getPdsUrlFromAgent } from '../utils/car-fetch.js';
+import { fetchRepoViaCAR, getPdsUrlFromAgent, getAgentToken } from '../utils/car-fetch.js';
 import { formatDate, formatDateRange } from '../utils/helpers.js';
 import * as ui from '../utils/ui.js';
 import { log } from '../utils/logger.js';
@@ -59,8 +59,9 @@ export async function fetchExistingRecords(
   }
 
   const pdsUrl = getPdsUrlFromAgent(agent);
+  const token = await getAgentToken(agent);
   const carStart = Date.now();
-  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE);
+  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, undefined, token);
   const carElapsed = ((Date.now() - carStart) / 1000).toFixed(1);
 
   const existingRecords = new Map<string, ExistingRecord>();
@@ -97,7 +98,8 @@ export async function fetchAllRecords(
   ui.startSpinner('📦 Fetching repo via CAR export...');
 
   const pdsUrl = getPdsUrlFromAgent(agent);
-  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE);
+  const token = await getAgentToken(agent);
+  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, undefined, token);
   const allRecords: ExistingRecord[] = carRecords.map((rec) => ({
     uri: rec.uri,
     cid: rec.cid,
