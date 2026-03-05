@@ -183,14 +183,12 @@ export async function publishRecordsWithApplyWrites(
     const batchStartTime = Date.now();
 
     // Build writes array
-    const writes = await Promise.all(
-      batch.map(async (record) => ({
-        $type: 'com.atproto.repo.applyWrites#create',
-        collection: RECORD_TYPE,
-        rkey: await generateTIDFromISO(record.playedTime, 'inject:playlist'),
-        value: record,
-      }))
-    );
+    const writes = batch.map((record) => ({
+      $type: 'com.atproto.repo.applyWrites#create',
+      collection: RECORD_TYPE,
+      rkey: generateTIDFromISO(record.playedTime, 'inject:playlist'),
+      value: record,
+    }));
 
     // Reserve quota
     const batchPoints = batch.length * POINTS_PER_RECORD;

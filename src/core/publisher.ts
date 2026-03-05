@@ -129,14 +129,12 @@ export async function publishRecords(
         message: `[${pct}%] Batch ${batchCounter} — records ${i + 1}–${Math.min(i + batch.length, total)}`,
       });
 
-      const writes = await Promise.all(
-        batch.map(async (record) => ({
-          $type: 'com.atproto.repo.applyWrites#create',
-          collection: RECORD_TYPE,
-          rkey: await generateTIDFromISO(record.playedTime, context),
-          value: record,
-        }))
-      );
+      const writes = batch.map((record) => ({
+        $type: 'com.atproto.repo.applyWrites#create',
+        collection: RECORD_TYPE,
+        rkey: generateTIDFromISO(record.playedTime, context),
+        value: record,
+      }));
 
       const batchPoints = batch.length * POINTS_PER_RECORD;
       await rl.waitForPermit(batchPoints, isCancelled);
