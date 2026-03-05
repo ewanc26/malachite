@@ -46,6 +46,28 @@ export function validateTid(tid: string): boolean {
   return TID_RE.test(tid);
 }
 
+// ─── Validation helpers ───────────────────────────────────────────────────────
+
+/**
+ * Error thrown by `ensureValidTid` when a TID fails validation.
+ */
+export class InvalidTidError extends Error {
+  constructor(message: string, public readonly tid?: string) {
+    super(message);
+    this.name = 'InvalidTidError';
+  }
+}
+
+/**
+ * Assert that `tid` is a valid AT Protocol TID.
+ * Throws `InvalidTidError` if the format check fails.
+ */
+export function ensureValidTid(tid: string): asserts tid is string {
+  if (!validateTid(tid)) {
+    throw new InvalidTidError(`Invalid TID format: "${tid}"`, tid);
+  }
+}
+
 // ─── Decode ──────────────────────────────────────────────────────────────────
 
 export interface DecodedTid {
@@ -63,30 +85,48 @@ export interface DecodedTid {
  */
 export function decodeTid(tid: string): DecodedTid {
   if (!validateTid(tid)) throw new TypeError(`Invalid TID: "${tid}"`);
-  const timestampUs = s32decode(tid.slice(0, 11));
-  const clockId     = s32decode(tid.slice(11));
-  return { timestampUs, clockId, date: new Date(Math.floor(timestampUs / 1000)) };
+  const timestampUs    = s32decode(tid.slice(0, 11));
+  const decodedClockId = s32decode(tid.slice(11));
+  return { timestampUs, clockId: decodedClockId, date: new Date(Math.floor(timestampUs / 1000)) };
+}
+
+/**
+ * Decode a TID and return only the microsecond timestamp.
+ * Prefer `decodeTid` for new code.
+ */
+export function decodeTidTimestamp(tid: string): number {
+  return decodeTid(tid).timestampUs;
+}
+
+/**
+ * Decode a TID and return only the clock identifier.
+ * Prefer `decodeTid` for new code.
+ */
+export function decodeTidClockId(tid: string): number {
+  return decodeTid(tid).clockId;
 }
 
 // ─── Monotonic clock ─────────────────────────────────────────────────────────
 
 // Module-level state — one clock per JS context (process or browser tab).
 let lastUs = 0;
-const CLOCK_ID = (() => {
+let clockId = (() => {
   const buf = new Uint8Array(1);
   (globalThis.crypto ?? (globalThis as unknown as { webcrypto: Crypto }).webcrypto)
     .getRandomValues(buf);
   return buf[0] % 32;
 })();
+let generatedCount = 0;
 
 function nextUs(targetUs: number): number {
   const us = targetUs <= lastUs ? lastUs + 1 : targetUs;
   lastUs = us;
+  generatedCount++;
   return us;
 }
 
 function makeTid(us: number): string {
-  return s32encode(us).padStart(11, '2') + s32encode(CLOCK_ID).padStart(2, '2');
+  return s32encode(us).padStart(11, '2') + s32encode(clockId).padStart(2, '2');
 }
 
 // ─── Generation ──────────────────────────────────────────────────────────────
@@ -133,14 +173,72 @@ export function compareTids(a: string, b: string): -1 | 0 | 1 {
   return 0;
 }
 
+// ─── Array utilities ─────────────────────────────────────────────────────────
+
+/**
+ * Returns `true` if every TID in the array is strictly greater than the one
+ * before it (lexicographic / chronological order).
+ */
+export function areMonotonic(tids: string[]): boolean {
+  for (let i = 1; i < tids.length; i++) {
+    if (tids[i] <= tids[i - 1]) return false;
+  }
+  return true;
+}
+
+// ─── Clock state ─────────────────────────────────────────────────────────────
+
+/**
+ * Snapshot of the module-level clock state.
+ * Intended for debugging and test assertions.
+ */
+export interface TidClockState {
+  lastTimestampUs: number;
+  clockId: number;
+  generatedCount: number;
+}
+
+/**
+ * Return a snapshot of the current clock state.
+ * Useful for asserting counts in tests.
+ */
+export function getTidClockState(): TidClockState {
+  return { lastTimestampUs: lastUs, clockId, generatedCount };
+}
+
 // ─── Testing utilities ───────────────────────────────────────────────────────
 
 /**
  * Reset the module-level monotonic clock to zero.
+ * Resets `lastTimestampUs` and `generatedCount` but preserves `clockId`.
  *
  * **Only use this in tests.** Calling it in production risks generating
  * duplicate or non-monotonic TIDs.
  */
 export function resetTidClock(): void {
   lastUs = 0;
+  generatedCount = 0;
+}
+
+/**
+ * Seed the clock with a fixed starting timestamp and clock identifier,
+ * making all subsequent TID generation deterministic.
+ *
+ * - `startUs` becomes the floor for the next generated timestamp (µs).
+ * - `newClockId` overrides the random clock identifier (0–31, default 0).
+ * - `generatedCount` is reset to 0.
+ *
+ * **Only use this in tests.**
+ *
+ * @example
+ * seedTidClock(1_000_000_000_000_000, 0);
+ * const tid1 = generateNextTID();
+ * seedTidClock(1_000_000_000_000_000, 0);
+ * const tid2 = generateNextTID();
+ * // tid1 === tid2
+ */
+export function seedTidClock(startUs = 0, newClockId = 0): void {
+  lastUs = startUs;
+  clockId = newClockId % 32;
+  generatedCount = 0;
 }
