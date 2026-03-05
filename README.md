@@ -820,6 +820,10 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup i
 
 AGPL-3.0-only - See LICENCE file for details
 
+## ☕ Support
+
+If you found this useful, consider [buying me a ko-fi](https://ko-fi.com/ewancroft)!
+
 ## Credits
 
 - Uses [@atproto/api](https://www.npmjs.com/package/@atproto/api) for ATProto interactions
