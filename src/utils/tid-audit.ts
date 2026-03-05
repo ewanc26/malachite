@@ -4,7 +4,7 @@
  * Utilities for auditing TID generation and producing reports
  */
 
-import { validateTid, decodeTidTimestamp, decodeTidClockId, compareTids } from './tid-clock.js';
+import { validateTid, decodeTid, compareTids } from '@ewanc26/tid';
 
 export interface TidAuditEntry {
   tid: string;
@@ -60,9 +60,10 @@ export function auditTids(tids: string[]): TidAuditReport {
     if (valid) {
       validCount++;
       try {
-        entry.timestamp = decodeTidTimestamp(tid);
-        entry.clockId = decodeTidClockId(tid);
-        entry.date = new Date(entry.timestamp / 1000);
+        const decoded = decodeTid(tid);
+        entry.timestamp = decoded.timestampUs;
+        entry.clockId = decoded.clockId;
+        entry.date = decoded.date;
       } catch (error) {
         entry.errors.push(`Decode error: ${error}`);
       }
