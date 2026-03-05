@@ -17,6 +17,7 @@ export default defineConfig({
 			// importing file (../src/core/) and never finds web/node_modules on Vercel.
 			'@ipld/car':      resolve('node_modules/@ipld/car'),
 			'@ipld/dag-cbor': resolve('node_modules/@ipld/dag-cbor'),
+			'@ewanc26/tid':   resolve('../packages/tid/dist/index.js'),
 		},
 	},
 
