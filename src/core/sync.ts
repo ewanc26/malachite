@@ -7,7 +7,7 @@
 import type { Agent } from '@atproto/api';
 import type { PlayRecord } from './types.js';
 import { RECORD_TYPE } from './config.js';
-import { fetchRepoViaCAR, getPdsUrlFromAgent, getAgentToken } from './car-fetch.js';
+import { fetchRepoViaCAR, getPdsUrlFromAgent, getAgentToken, CARFetchUnauthorizedError } from './car-fetch.js';
 
 export interface ExistingRecord {
   uri: string;
@@ -44,11 +44,43 @@ export async function fetchExistingRecords(
   signal?.throwIfAborted();
 
   const pdsUrl = getPdsUrlFromAgent(agent);
-  const token = await getAgentToken(agent);
-  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, signal, token);
+  let token = await getAgentToken(agent);
+  let carRecords;
+  try {
+    carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, signal, token);
+  } catch (err) {
+    if (err instanceof CARFetchUnauthorizedError) {
+      // The token we sent was invalid or expired.  Try to silently refresh the
+      // session (works for both CredentialSession / AtpAgent and OAuth agents
+      // that expose a refreshSession method on their session manager) then
+      // retry the CAR fetch exactly once before giving up.
+      const sm = (agent as any)?.sessionManager;
+      let retried = false;
+      if (typeof sm?.refreshSession === 'function') {
+        try {
+          await sm.refreshSession();
+          const freshToken = await getAgentToken(agent);
+          if (freshToken && freshToken !== token) {
+            carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, signal, freshToken);
+            token = freshToken;
+            retried = true;
+          }
+        } catch {
+          // Refresh or second fetch failed — fall through and throw below.
+        }
+      }
+      if (!retried) {
+        // Clear the stale session cache so the next call starts clean.
+        sessionCache.delete(did);
+        throw err;
+      }
+    } else {
+      throw err;
+    }
+  }
 
   const map = new Map<string, ExistingRecord>();
-  for (const rec of carRecords) {
+  for (const rec of carRecords!) {
     const value = rec.value as unknown as PlayRecord;
     map.set(recordKey(value), { uri: rec.uri, cid: rec.cid, value });
   }
@@ -76,10 +108,37 @@ export async function fetchAllRecordsForDedup(
   signal?.throwIfAborted();
 
   const pdsUrl = getPdsUrlFromAgent(agent);
-  const token = await getAgentToken(agent);
-  const carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, signal, token);
+  let token = await getAgentToken(agent);
+  let carRecords;
+  try {
+    carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, signal, token);
+  } catch (err) {
+    if (err instanceof CARFetchUnauthorizedError) {
+      const sm = (agent as any)?.sessionManager;
+      let retried = false;
+      if (typeof sm?.refreshSession === 'function') {
+        try {
+          await sm.refreshSession();
+          const freshToken = await getAgentToken(agent);
+          if (freshToken && freshToken !== token) {
+            carRecords = await fetchRepoViaCAR(pdsUrl, did, RECORD_TYPE, signal, freshToken);
+            token = freshToken;
+            retried = true;
+          }
+        } catch {
+          // fall through
+        }
+      }
+      if (!retried) {
+        sessionCache.delete(did);
+        throw err;
+      }
+    } else {
+      throw err;
+    }
+  }
 
-  const all: ExistingRecord[] = carRecords.map((rec) => ({
+  const all: ExistingRecord[] = carRecords!.map((rec) => ({
     uri: rec.uri,
     cid: rec.cid,
     value: rec.value as unknown as PlayRecord,

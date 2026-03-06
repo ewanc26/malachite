@@ -320,25 +320,24 @@ export async function publishRecordsWithApplyWrites(
       const rateLimitError = isRateLimitError(err);
 
       if (rateLimitError) {
-        log.warn('⚠️  Rate limit hit (unexpected with proactive pacing) - updating from error headers...');
-        
-        // Extract and update from error headers
-        let headers: Record<string, string> | undefined;
-        if (err?.response?.headers) {
-          headers = err.response.headers;
-        } else if (err?.headers) {
-          headers = err.headers;
-        }
-        
-        if (headers && Object.keys(headers).length > 0) {
-          const normalized = normalizeHeaders(headers);
-          const hasRateLimitHeaders = Object.keys(normalized).some(k => k.includes('ratelimit'));
-          if (hasRateLimitHeaders) {
-            rl.updateFromHeaders(normalized);
-          }
-        }
-        
-        // Wait for permit and retry
+        log.warn('⚠️  Rate limit hit — pausing until quota resets…');
+
+        // XRPCError (from @atproto/xrpc) carries response headers directly on
+        // err.headers as a plain Record<string, string> built via
+        // Object.fromEntries(response.headers.entries()), so keys are already
+        // lowercase.  There is no err.response property on this error class.
+        const errHeaders: Record<string, string> | undefined =
+          err?.headers && typeof err.headers === 'object'
+            ? (err.headers as Record<string, string>)
+            : undefined;
+
+        // handleRateLimitHit zeroes remaining unconditionally — this is the
+        // critical fix.  Previously we only called updateFromHeaders when
+        // headers were present, meaning a headerless 429 left state untouched
+        // and waitForPermit returned immediately, sending another request.
+        rl.handleRateLimitHit(errHeaders ? normalizeHeaders(errHeaders) : undefined);
+
+        // Now waitForPermit will block until the window resets.
         await rl.waitForPermit(batchPoints);
         continue;
         
