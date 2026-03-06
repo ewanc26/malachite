@@ -19,6 +19,7 @@ import {
   fetchAllRecordsForDedup,
   findDuplicateGroups,
   removeDuplicateRecords,
+  type ExistingRecord,
 } from '$core/sync.js';
 import { publishRecords, type PublishProgress } from '$core/publisher.js';
 
@@ -121,20 +122,41 @@ export async function runImport(
     records = unique;
     if (inputDups > 0) onLog('warn', `Removed ${inputDups.toLocaleString()} duplicate(s) from input`);
 
-    // ── Sync check ───────────────────────────────────────────────────────────
+    // ── Sync check (CAR primary; applyWrites fallback) ───────────────────────
+    // CAR export (com.atproto.sync.getRepo) sits on a separate, far more
+    // generous rate-limit bucket and costs zero write-quota points — it's the
+    // preferred way to identify records we already have so we skip them.
+    // If CAR is unavailable for any reason we fall back gracefully: the record
+    // list is left unfiltered and applyWrites handles everything.  The PDS
+    // will reject creates for rkeys that already exist, but new records still
+    // land correctly and the import isn't aborted.
     onLog('section', '── Sync Check ───────────────────────────────────────');
-    onLog('info', 'Fetching existing records from Teal…');
-    const existing = await fetchExistingRecords(
-      agent,
-      (n) => onLog('progress', `  Fetched ${n.toLocaleString()} existing records…`),
-      fresh,
-      sig,
-    );
+    onLog('info', 'Fetching existing records via CAR export…');
+    let existing: Map<string, ExistingRecord>;
+    let carSyncOk = true;
+    try {
+      existing = await fetchExistingRecords(
+        agent,
+        (n) => onLog('progress', `  Fetched ${n.toLocaleString()} existing records…`),
+        fresh,
+        sig,
+      );
+    } catch (carErr) {
+      carSyncOk = false;
+      const msg = carErr instanceof Error ? carErr.message : String(carErr);
+      onLog('warn', `⚠️  CAR sync check unavailable: ${msg}`);
+      onLog('warn', `   Falling back to full applyWrites — existing records will be rejected by the PDS, new ones will land correctly.`);
+      existing = new Map();
+    }
     const before = records.length;
     records = filterNewRecords(records, existing);
-    const skipped = before - records.length;
-    if (skipped > 0) onLog('info', `Skipped ${skipped.toLocaleString()} already-imported record(s)`);
-    onLog('success', `${records.length.toLocaleString()} new record(s) to import`);
+    if (carSyncOk) {
+      const skipped = before - records.length;
+      if (skipped > 0) onLog('info', `Skipped ${skipped.toLocaleString()} already-imported record(s)`);
+      onLog('success', `${records.length.toLocaleString()} new record(s) to import`);
+    } else {
+      onLog('info', `${records.length.toLocaleString()} record(s) queued for import (deduplication skipped — CAR unavailable)`);
+    }
 
     if (records.length === 0) {
       onLog('success', '✓ Nothing to import — all records already exist in Teal!');

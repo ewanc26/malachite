@@ -600,22 +600,49 @@ export async function runCLI(): Promise<void> {
 
     if (agent) {
       const originalRecords = [...records];
-      const existingRecords = await fetchExistingRecords(agent, cfg, args.fresh ?? false);
-      records = filterNewRecords(records, existingRecords);
-      if (records.length === 0) {
+
+      // CAR export (com.atproto.sync.getRepo) sits on a separate, far more
+      // generous rate-limit bucket and costs zero write-quota points — prefer
+      // it for the dedup check so we only call applyWrites for new records.
+      // If CAR is unavailable for any reason (network error, auth, PDS doesn't
+      // support it), fall back gracefully: proceed with the full record set and
+      // let applyWrites handle everything.  The PDS rejects creates for rkeys
+      // that already exist, but new records still land and the import continues.
+      let carSyncOk = true;
+      let existingMap: Awaited<ReturnType<typeof fetchExistingRecords>>;
+      try {
+        existingMap = await fetchExistingRecords(agent, cfg, args.fresh ?? false);
+      } catch (carErr) {
+        carSyncOk = false;
+        const msg = (carErr as Error)?.message ?? String(carErr);
+        log.warn(`⚠️  CAR sync check unavailable: ${msg}`);
+        log.warn(`   Falling back to full applyWrites — existing records will be rejected by the PDS, new ones will land correctly.`);
+        log.blank();
+        existingMap = new Map();
+      }
+
+      records = filterNewRecords(records, existingMap);
+
+      if (records.length === 0 && carSyncOk) {
         log.success('All records already exist in Teal. Nothing to import!');
         process.exit(0);
       }
-      if (mode === 'sync' || mode === 'combined') {
-        displaySyncStats(originalRecords, existingRecords, records);
-      } else {
-        const skipped = originalRecords.length - records.length;
-        if (skipped > 0) {
-          log.info(`Found ${skipped.toLocaleString()} record(s) already in Teal (skipping)`);
-          log.info(`New records to import: ${records.length.toLocaleString()}`);
+
+      if (carSyncOk) {
+        if (mode === 'sync' || mode === 'combined') {
+          displaySyncStats(originalRecords, existingMap, records);
         } else {
-          log.info(`All ${records.length.toLocaleString()} records are new`);
+          const skipped = originalRecords.length - records.length;
+          if (skipped > 0) {
+            log.info(`Found ${skipped.toLocaleString()} record(s) already in Teal (skipping)`);
+            log.info(`New records to import: ${records.length.toLocaleString()}`);
+          } else {
+            log.info(`All ${records.length.toLocaleString()} records are new`);
+          }
+          log.blank();
         }
+      } else {
+        log.info(`${records.length.toLocaleString()} record(s) queued (deduplication skipped — CAR unavailable)`);
         log.blank();
       }
     }
