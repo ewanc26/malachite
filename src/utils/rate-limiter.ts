@@ -686,6 +686,45 @@ export class RateLimiter {
   }
   
   /**
+   * Called when the server returns a 429.
+   *
+   * Zeroes `remaining` unconditionally so the next `waitForPermit` call
+   * actually blocks until the window resets, regardless of whether the 429
+   * response included rate-limit headers.  If headers ARE present they are
+   * applied first (so we get an accurate `resetAt`), then remaining is
+   * forced to 0.
+   *
+   * @param errHeaders  Optional normalised headers from the 429 error response.
+   */
+  handleRateLimitHit(errHeaders?: Record<string, string>): void {
+    // Apply header info first so resetAt is as accurate as possible.
+    if (errHeaders && Object.keys(errHeaders).length > 0) {
+      this.updateFromHeaders(errHeaders);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const state = this.readState();
+    if (state) {
+      state.remaining = 0;
+      state.updatedAt = now;
+      this.writeState(state);
+      log.warn(`[RateLimiter] 🛑 429 received — zeroed remaining, will wait until ${new Date(state.resetAt * 1000).toISOString()}`);
+    } else {
+      // No state yet — create a blocking stub with a 60-second reset.
+      this.writeState({
+        limit: 5000,
+        remaining: 0,
+        resetAt: now + 60,
+        windowSeconds: 3600,
+        updatedAt: now,
+        headroomThreshold: this.headroomThreshold,
+      });
+      this.hasLearnedFromServer = true;
+      log.warn('[RateLimiter] 🛑 429 received (no prior state) — blocking for 60s');
+    }
+  }
+
+  /**
    * Wait for a permit with the given number of points.
    * Combines reserveQuota and waitForReset - loops until permit granted.
    * 

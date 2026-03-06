@@ -90,6 +90,22 @@ async function walkMST(
 
 // ─── public API ──────────────────────────────────────────────────────────────
 
+/**
+ * Thrown when the PDS returns 401 on com.atproto.sync.getRepo.
+ * Callers can catch this specifically to surface a re-auth prompt rather than
+ * treating it as a generic network error.
+ */
+export class CARFetchUnauthorizedError extends Error {
+  constructor(pdsUrl: string, did: string) {
+    super(
+      `CAR fetch returned 401 Unauthorized for ${did} at ${pdsUrl}. ` +
+      `The PDS requires authentication but a valid token could not be obtained. ` +
+      `Try signing out and back in to refresh your session.`
+    );
+    this.name = 'CARFetchUnauthorizedError';
+  }
+}
+
 export interface CARRecord {
   rkey: string;
   uri: string;
@@ -120,6 +136,9 @@ export async function fetchRepoViaCAR(
   const response = await fetch(url, { headers, signal });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new CARFetchUnauthorizedError(pdsUrl, did);
+    }
     throw new Error(`CAR fetch failed: ${response.status} ${response.statusText}`);
   }
 
@@ -180,7 +199,9 @@ export function getPdsUrlFromAgent(agent: unknown): string {
 export async function getAgentToken(agent: unknown): Promise<string | undefined> {
   const a = agent as Record<string, unknown>;
 
-  // Password-auth AtpAgent: session carries a plain JWT.
+  // Password-auth CredentialSession (AtpAgent):
+  // session.accessJwt holds the current JWT. It may be expired — callers
+  // should handle CARFetchUnauthorizedError and retry after refreshing.
   const jwt = (a['session'] as any)?.accessJwt;
   if (jwt) return jwt as string;
 
@@ -191,7 +212,19 @@ export async function getAgentToken(agent: unknown): Promise<string | undefined>
       const tokens = await sm.getTokens() as { accessToken?: string } | null;
       if (tokens?.accessToken) return tokens.accessToken;
     } catch {
-      // If the OAuth token is expired and can't be refreshed silently, fall through.
+      // Token read failed — try a silent refresh before giving up.
+    }
+
+    // If getTokens() returned nothing (expired session), attempt a silent
+    // refresh via the session manager and retry once.
+    if (typeof sm?.refresh === 'function') {
+      try {
+        await sm.refresh();
+        const refreshed = await sm.getTokens() as { accessToken?: string } | null;
+        if (refreshed?.accessToken) return refreshed.accessToken;
+      } catch {
+        // Refresh failed — fall through and return undefined.
+      }
     }
   }
 
