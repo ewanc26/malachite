@@ -183,16 +183,18 @@ There's no formal CLA or contributor agreement — AGPL-3.0 covers contributions
 
 ## Publishing `@ewanc26/tid`
 
-The `packages/tid/` directory is the source for the [`@ewanc26/tid`](https://www.npmjs.com/package/@ewanc26/tid) package. It is versioned and published independently from the main CLI.
+> **Note:** `@ewanc26/tid` is now canonically maintained in the [`@ewanc26/pkgs`](https://github.com/ewanc26/pkgs) monorepo. The copy in `packages/tid/` here is kept for historical context. All version bumps, releases, and npm publishes should happen from there.
 
-To cut a new release:
+To cut a new release, work from the pkgs monorepo:
 
 ```sh
-cd packages/tid
+cd /path/to/pkgs
+git subtree pull --prefix=packages/tid malachite malachite-split
 
+cd packages/tid
 # Bump the version in package.json, then:
 pnpm build
 npm publish --access public --otp=<your-2fa-code>
 ```
 
-The package has no runtime dependencies and must stay that way. If a change to `src/core/tid.ts` affects the public API of the package, update `packages/tid/src/index.ts` to match and bump the version accordingly (semver — patch for fixes, minor for new exports, major for breaking changes).
+The package has no runtime dependencies and must stay that way. If a change to `src/core/tid.ts` in this repo affects the public API of the package, update `packages/tid/src/index.ts` in `pkgs` to match and bump the version accordingly (semver — patch for fixes, minor for new exports, major for breaking changes).

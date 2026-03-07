@@ -1,10 +1,12 @@
 # @ewanc26/tid
 
+> **Canonical source:** This package is now maintained in the [`@ewanc26/pkgs`](https://github.com/ewanc26/pkgs) monorepo under [`packages/tid`](https://github.com/ewanc26/pkgs/tree/main/packages/tid). This copy exists for historical context — please open issues and PRs there.
+
 Zero-dependency [AT Protocol](https://atproto.com/) TID (Timestamp Identifier) generation for Node.js and browsers.
 
 This package is **written in TypeScript** and compiled to **plain JavaScript**, so it ships with type definitions for TypeScript users and runs anywhere the Web Crypto API is available — Node.js 20+, Deno, Bun, and modern browsers.
 
-TIDs are 13-character, lexicographically sortable record keys used across the AT Protocol and Bluesky. They’re monotonic identifiers derived from a microsecond timestamp and a 5-bit clock ID. When multiple TIDs would otherwise share the same microsecond, this package avoids collisions by nudging the clock ID (initialised per JS context) so each generated TID stays unique and strictly increasing within that runtime.
+TIDs are 13-character, lexicographically sortable record keys used across the AT Protocol and Bluesky. They're monotonic identifiers derived from a microsecond timestamp and a 5-bit clock ID. When multiple TIDs would otherwise share the same microsecond, this package avoids collisions by nudging the clock ID (initialised per JS context) so each generated TID stays unique and strictly increasing within that runtime.
 
 ---
 
@@ -131,6 +133,8 @@ interface DecodedTid {
 
 ## Testing & development
 
+Development happens in the [`@ewanc26/pkgs`](https://github.com/ewanc26/pkgs) monorepo. See the monorepo README for setup instructions.
+
 * `resetTidClock()` is exported for tests to make deterministic TID generation possible.
 * The library has zero runtime deps and uses the Web Crypto API for secure randomness. When running in older environments, provide a compatible Web Crypto polyfill if necessary.
 
@@ -138,4 +142,4 @@ interface DecodedTid {
 
 ## Licence
 
-AGPL-3.0-only — same as [Malachite](https://github.com/ewanc26/malachite/tree/main).
+AGPL-3.0-only — see the [pkgs monorepo licence](https://github.com/ewanc26/pkgs/blob/main/LICENSE).
