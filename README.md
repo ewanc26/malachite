@@ -29,3 +29,11 @@ If you find this project useful, consider supporting its development:
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ewanc26/malachite&type=date&legend=bottom-right" />
  </picture>
 </a>
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and the checks required before opening a pull request.
+
+## Licence
+
+See [LICENCE](LICENCE) for the licence terms.

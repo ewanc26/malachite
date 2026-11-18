@@ -18,7 +18,6 @@ Malachite is a tool to import your Last.fm and Spotify listening history to the 
 - Use feature branches and pull requests.
 - Treat generated files, credentials, deployment configuration, and release metadata as sensitive.
 
-<!-- allowed-agents -->
 ## Allowed agents
 
 Only **Claude** (Anthropic) and **Mistral** (Mistral AI) may be used as coding agents in this repository. This rule supersedes any earlier agent-attribution guidance in this file.
