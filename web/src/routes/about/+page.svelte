@@ -189,6 +189,7 @@ pnpm start -i lastfm.csv --dry-run</code></pre>
       <div class="person-links">
         <a href="https://github.com/ewanc26" target="_blank" rel="noopener">GitHub</a>
         <a href="https://ko-fi.com/ewancroft" target="_blank" rel="noopener">Ko-fi</a>
+        <a href="https://liberapay.com/ewanc26/" target="_blank" rel="noopener">Liberapay</a>
         <a href="https://ewancroft.uk" target="_blank" rel="noopener">Website</a>
       </div>
     </div>
@@ -235,6 +236,8 @@ pnpm start -i lastfm.csv --dry-run</code></pre>
     <a href="https://github.com/ewanc26/malachite" target="_blank" rel="noopener">↗ View on GitHub</a>
     <span class="sep">·</span>
     <a href="https://ko-fi.com/ewancroft" target="_blank" rel="noopener">♥ Support Malachite</a>
+    <span class="sep">·</span>
+    <a href="https://liberapay.com/ewanc26/" target="_blank" rel="noopener">♥ Liberapay</a>
   </footer>
 
 </main>
