@@ -247,6 +247,8 @@
     <a href="https://github.com/ewanc26/malachite" target="_blank" rel="noopener">↗ GitHub</a>
     <span class="sep">·</span>
     <a href="https://ko-fi.com/ewancroft" target="_blank" rel="noopener">♥ Support</a>
+    <span class="sep">·</span>
+    <a href="https://liberapay.com/ewanc26/" target="_blank" rel="noopener">♥ Liberapay</a>
   </footer>
 </main>
 
