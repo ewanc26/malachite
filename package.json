@@ -37,9 +37,9 @@
   "author": "Ewan Croft",
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "@atproto/api": "^0.18.13",
-    "@atproto/common-web": "^0.4.12",
-    "@ipld/car": "^5.3.2",
+    "@atproto/api": "^0.32.0",
+    "@atproto/common-web": "^0.5.17",
+    "@ipld/car": "^5.4.7",
     "@ipld/dag-cbor": "^9.2.2",
     "chalk": "^5.6.2",
     "multiformats": "^13.3.1",
