@@ -1,289 +1,337 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { fly } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
-  import type { Agent } from '@atproto/api';
+	import { onMount } from 'svelte';
+	import { fly } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
+	import type { Agent } from '@atproto/api';
 
-  import { initOAuth } from '$lib/core/oauth.js';
-  import { modeNeeds, stepLabelsFor } from '$lib/modes.js';
-  import { runImport, type PublishProgress } from '$lib/core/import.js';
-  import type { ImportMode, LogEntry } from '$lib/types.js';
+	import { initOAuth } from '#lib/core/oauth.js';
+	import { modeNeeds, stepLabelsFor } from '#lib/modes.js';
+	import { runImport, type PublishProgress } from '#lib/core/import.js';
+	import type { ImportMode, LogEntry } from '#lib/types.js';
 
-  import StepIndicator from '$lib/components/StepIndicator.svelte';
-  import ModeStep      from '$lib/components/steps/ModeStep.svelte';
-  import AuthStep      from '$lib/components/steps/AuthStep.svelte';
-  import FilesStep     from '$lib/components/steps/FilesStep.svelte';
-  import OptionsStep   from '$lib/components/steps/OptionsStep.svelte';
-  import RunStep       from '$lib/components/steps/RunStep.svelte';
+	import StepIndicator from '#lib/components/StepIndicator.svelte';
+	import ModeStep from '#lib/components/steps/ModeStep.svelte';
+	import AuthStep from '#lib/components/steps/AuthStep.svelte';
+	import FilesStep from '#lib/components/steps/FilesStep.svelte';
+	import OptionsStep from '#lib/components/steps/OptionsStep.svelte';
+	import RunStep from '#lib/components/steps/RunStep.svelte';
 
-  // ─── persistence keys ────────────────────────────────────────────────────────
+	// ─── persistence keys ────────────────────────────────────────────────────────
 
-  const KEY_MODE = 'malachite:mode';
-  const KEY_STEP = 'malachite:step';
+	const KEY_MODE = 'malachite:mode';
+	const KEY_STEP = 'malachite:step';
 
-  // ─── wizard state ────────────────────────────────────────────────────────────
-  // Read synchronously from sessionStorage — safe because ssr = false.
-  // This eliminates FOUC: the component renders immediately into the right step.
+	// ─── wizard state ────────────────────────────────────────────────────────────
+	// Read synchronously from sessionStorage — safe because ssr = false.
+	// This eliminates FOUC: the component renders immediately into the right step.
 
-  const _initMode = sessionStorage.getItem(KEY_MODE) as ImportMode | null;
-  const _initStep = Number(sessionStorage.getItem(KEY_STEP)) || 0;
+	const _initMode = sessionStorage.getItem(KEY_MODE) as ImportMode | null;
+	const _initStep = Number(sessionStorage.getItem(KEY_STEP)) || 0;
 
-  let step     = $state(_initStep);
-  let prevStep = $state(_initStep);
-  let mode     = $state<ImportMode | null>(_initMode);
+	let step = $state(_initStep);
+	let prevStep = $state(_initStep);
+	let mode = $state<ImportMode | null>(_initMode);
 
-  let agent        = $state<Agent | null>(null);
-  let lastfmFiles  = $state<File[]>([]);
-  let spotifyFiles = $state<File[]>([]);
+	let agent = $state<Agent | null>(null);
+	let lastfmFiles = $state<File[]>([]);
+	let spotifyFiles = $state<File[]>([]);
 
-  let dryRun       = $state(false);
-  let reverseOrder = $state(false);
-  let fresh        = $state(false);
+	let dryRun = $state(false);
+	let reverseOrder = $state(false);
+	let fresh = $state(false);
 
-  let isRunning   = $state(false);
-  // Plain variable (not $state) — only ever read inside the isCancelled() closure.
-  // Using $state here caused stale reads: Svelte batches signal updates to the next
-  // microtask, but isCancelled() can be polled synchronously before that flush.
-  let cancelled = false;
-  // Separate reactive flag purely for UI feedback (shows 'Stopping…').
-  let stopping = $state(false);
-  let logs        = $state<LogEntry[]>([]);
-  let progress    = $state<PublishProgress | null>(null);
-  let result      = $state<{ success: number; errors: number; cancelled: boolean } | null>(null);
-  let importError = $state<string | null>(null);
+	let isRunning = $state(false);
+	// Plain variable (not $state) — only ever read inside the isCancelled() closure.
+	// Using $state here caused stale reads: Svelte batches signal updates to the next
+	// microtask, but isCancelled() can be polled synchronously before that flush.
+	let cancelled = false;
+	// Separate reactive flag purely for UI feedback (shows 'Stopping…').
+	let stopping = $state(false);
+	let logs = $state<LogEntry[]>([]);
+	let progress = $state<PublishProgress | null>(null);
+	let result = $state<{ success: number; errors: number; cancelled: boolean } | null>(null);
+	let importError = $state<string | null>(null);
 
-  // ─── derived ─────────────────────────────────────────────────────────────────
+	// ─── derived ─────────────────────────────────────────────────────────────────
 
-  let needs       = $derived(modeNeeds(mode));
-  let stepLabels  = $derived(stepLabelsFor(mode));
-  let goingForward = $derived(step >= prevStep);
+	let needs = $derived(modeNeeds(mode));
+	let stepLabels = $derived(stepLabelsFor(mode));
+	let goingForward = $derived(step >= prevStep);
 
-  // ─── navigation ──────────────────────────────────────────────────────────────
+	// ─── navigation ──────────────────────────────────────────────────────────────
 
-  function goTo(n: number) {
-    prevStep = step;
-    step = n;
-    sessionStorage.setItem(KEY_STEP, String(n));
-  }
+	function goTo(n: number) {
+		prevStep = step;
+		step = n;
+		sessionStorage.setItem(KEY_STEP, String(n));
+	}
 
-  function setMode(m: ImportMode | null) {
-    mode = m;
-    if (m) sessionStorage.setItem(KEY_MODE, m);
-    else    sessionStorage.removeItem(KEY_MODE);
-  }
+	function setMode(m: ImportMode | null) {
+		mode = m;
+		if (m) sessionStorage.setItem(KEY_MODE, m);
+		else sessionStorage.removeItem(KEY_MODE);
+	}
 
-  function handleSelectMode(m: ImportMode) {
-    setMode(m);
-    goTo(1);
-  }
+	function handleSelectMode(m: ImportMode) {
+		setMode(m);
+		goTo(1);
+	}
 
-  function handleBack() {
-    if (step === 3 && mode === 'deduplicate') { goTo(1); return; }
-    goTo(Math.max(0, step - 1));
-  }
+	function handleBack() {
+		if (step === 3 && mode === 'deduplicate') {
+			goTo(1);
+			return;
+		}
+		goTo(Math.max(0, step - 1));
+	}
 
-  function handleAuth(a: Agent) {
-    agent = a;
-    goTo(needs.files ? 2 : 3);
-  }
+	function handleAuth(a: Agent) {
+		agent = a;
+		goTo(needs.files ? 2 : 3);
+	}
 
-  // ─── import ──────────────────────────────────────────────────────────────────
+	// ─── import ──────────────────────────────────────────────────────────────────
 
-  function addLog(level: LogEntry['level'], message: string) {
-    logs = [...logs, { level, message, timestamp: Date.now() }];
-  }
+	function addLog(level: LogEntry['level'], message: string) {
+		logs = [...logs, { level, message, timestamp: Date.now() }];
+	}
 
-  async function handleStartImport() {
-    if (!agent || !mode) return;
-    isRunning = true; cancelled = false; stopping = false; logs = []; importError = null; result = null;
-    goTo(4);
-    try {
-      result = await runImport(
-        agent,
-        mode,
-        lastfmFiles,
-        spotifyFiles,
-        { dryRun, reverseOrder, fresh },
-        {
-          onLog:       addLog,
-          onProgress:  (p) => { progress = p; },
-          isCancelled: () => cancelled,
-        },
-      );
-      const n = result.success.toLocaleString();
-      if (mode === 'deduplicate') {
-        if (result.cancelled)  addLog('warn',    `Stopped. ${n} duplicate(s) removed.`);
-        else if (dryRun)       addLog('success', `Dry run complete — ${n} duplicate(s) would be removed.`);
-        else                   addLog('success', `Done! ${n} duplicate(s) removed.`);
-      } else {
-        if (result.cancelled)  addLog('warn',    `Stopped. ${n} record(s) published.`);
-        else if (dryRun)       addLog('success', `Dry run complete — ${n} record(s) would be imported.`);
-        else {
-          addLog('success', `Import complete! ${n} record(s) published.`);
-          if (result.errors > 0) addLog('warn', `${result.errors} record(s) failed.`);
-        }
-      }
-    } catch (err: any) {
-      importError = err.message ?? 'An unexpected error occurred';
-      addLog('error', `Fatal: ${importError}`);
-    } finally {
-      isRunning = false;
-      stopping  = false;
-    }
-  }
+	async function handleStartImport() {
+		if (!agent || !mode) return;
+		isRunning = true;
+		cancelled = false;
+		stopping = false;
+		logs = [];
+		importError = null;
+		result = null;
+		goTo(4);
+		try {
+			result = await runImport(
+				agent,
+				mode,
+				lastfmFiles,
+				spotifyFiles,
+				{ dryRun, reverseOrder, fresh },
+				{
+					onLog: addLog,
+					onProgress: (p) => {
+						progress = p;
+					},
+					isCancelled: () => cancelled
+				}
+			);
+			const n = result.success.toLocaleString();
+			if (mode === 'deduplicate') {
+				if (result.cancelled) addLog('warn', `Stopped. ${n} duplicate(s) removed.`);
+				else if (dryRun)
+					addLog('success', `Dry run complete — ${n} duplicate(s) would be removed.`);
+				else addLog('success', `Done! ${n} duplicate(s) removed.`);
+			} else {
+				if (result.cancelled) addLog('warn', `Stopped. ${n} record(s) published.`);
+				else if (dryRun) addLog('success', `Dry run complete — ${n} record(s) would be imported.`);
+				else {
+					addLog('success', `Import complete! ${n} record(s) published.`);
+					if (result.errors > 0) addLog('warn', `${result.errors} record(s) failed.`);
+				}
+			}
+		} catch (err: any) {
+			importError = err.message ?? 'An unexpected error occurred';
+			addLog('error', `Fatal: ${importError}`);
+		} finally {
+			isRunning = false;
+			stopping = false;
+		}
+	}
 
-  // ─── OAuth callback ────────────────────────────────────────────────────────
+	// ─── OAuth callback ────────────────────────────────────────────────────────
 
-  onMount(async () => {
-    // If the URL contains an OAuth callback (?code=…&state=…), init() processes
-    // it and returns the new session. If a session was already stored from a
-    // previous visit it also comes back here.
-    try {
-      const oauthAgent = await initOAuth();
-      if (oauthAgent) {
-        agent = oauthAgent;
-        // mode is already restored synchronously from sessionStorage above.
-        goTo(modeNeeds(mode).files ? 2 : 3);
-      }
-    } catch (err: any) {
-      console.error('OAuth init error:', err);
-    }
-  });
+	onMount(async () => {
+		// If the URL contains an OAuth callback (?code=…&state=…), init() processes
+		// it and returns the new session. If a session was already stored from a
+		// previous visit it also comes back here.
+		try {
+			const oauthAgent = await initOAuth();
+			if (oauthAgent) {
+				agent = oauthAgent;
+				// mode is already restored synchronously from sessionStorage above.
+				goTo(modeNeeds(mode).files ? 2 : 3);
+			}
+		} catch (err: any) {
+			console.error('OAuth init error:', err);
+		}
+	});
 
-  function handleReset() {
-    setMode(null);
-    goTo(0);
-    agent = null; lastfmFiles = []; spotifyFiles = [];
-    dryRun = false; reverseOrder = false; fresh = false;
-    logs = []; progress = null; result = null; importError = null;
-    cancelled = false; stopping = false;
-  }
+	function handleReset() {
+		setMode(null);
+		goTo(0);
+		agent = null;
+		lastfmFiles = [];
+		spotifyFiles = [];
+		dryRun = false;
+		reverseOrder = false;
+		fresh = false;
+		logs = [];
+		progress = null;
+		result = null;
+		importError = null;
+		cancelled = false;
+		stopping = false;
+	}
 </script>
 
 <svelte:head>
-  <title>Malachite — Import to Teal</title>
-  <meta name="description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import." />
-  <link rel="canonical" href="https://malachite.croft.click/import" />
-  <meta name="robots" content="noindex" />
+	<title>Malachite — Import to Teal</title>
+	<meta
+		name="description"
+		content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import."
+	/>
+	<link rel="canonical" href="https://malachite.croft.click/import" />
+	<meta name="robots" content="noindex" />
 
-  <!-- Open Graph -->
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://malachite.croft.click/import" />
-  <meta property="og:title" content="Malachite — Import to Teal" />
-  <meta property="og:description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import." />
-  <meta property="og:image" content="https://malachite.croft.click/og-import.svg" />
+	<!-- Open Graph -->
+	<meta property="og:type" content="website" />
+	<meta property="og:url" content="https://malachite.croft.click/import" />
+	<meta property="og:title" content="Malachite — Import to Teal" />
+	<meta
+		property="og:description"
+		content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import."
+	/>
+	<meta property="og:image" content="https://malachite.croft.click/og-import.svg" />
 
-  <!-- Twitter / X card -->
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Malachite — Import to Teal" />
-  <meta name="twitter:description" content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import." />
-  <meta name="twitter:image" content="https://malachite.croft.click/og-import.svg" />
+	<!-- Twitter / X card -->
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="Malachite — Import to Teal" />
+	<meta
+		name="twitter:description"
+		content="Import your Last.fm and Spotify listening history into Teal on ATProto. Choose a mode, sign in, upload your export, and import."
+	/>
+	<meta name="twitter:image" content="https://malachite.croft.click/og-import.svg" />
 </svelte:head>
 
 <main>
-  <header>
-    <p class="logo-text">Malachite</p>
-    <p class="tagline">Import Last.fm &amp; Spotify history to ATProto / Teal</p>
-  </header>
+	<header>
+		<p class="logo-text">Malachite</p>
+		<p class="tagline">Import Last.fm &amp; Spotify history to ATProto / Teal</p>
+	</header>
 
-  {#if step < 5}
-    <StepIndicator {step} {stepLabels} />
-  {/if}
+	{#if step < 5}
+		<StepIndicator {step} {stepLabels} />
+	{/if}
 
-  <div class="step-viewport">
-    {#key step}
-      <div
-        class="step-slide"
-        in:fly={{ x: goingForward ? 40 : -40, duration: 280, easing: cubicOut }}
-        out:fly={{ x: goingForward ? -40 : 40, duration: 200, easing: cubicOut }}
-      >
-        {#if step === 0}
-          <ModeStep onselect={handleSelectMode} />
-
-        {:else if step === 1}
-          <AuthStep onauth={handleAuth} onback={handleBack} />
-
-        {:else if step === 2}
-          <FilesStep
-            bind:lastfmFiles
-            bind:spotifyFiles
-            {needs}
-            oncontinue={() => goTo(3)}
-            onback={handleBack}
-          />
-
-        {:else if step === 3}
-          <OptionsStep
-            {mode}
-            bind:dryRun
-            bind:reverseOrder
-            bind:fresh
-            onstartimport={handleStartImport}
-            onback={handleBack}
-          />
-
-        {:else if step === 4}
-          <RunStep
-            {isRunning}
-            {stopping}
-            {mode}
-            {dryRun}
-            {logs}
-            {progress}
-            {result}
-            {importError}
-            oncancel={() => { cancelled = true; stopping = true; }}
-            onreset={handleReset}
-          />
-        {/if}
-      </div>
-    {/key}
-  </div>
-  <footer>
-    <a href="/">← Home</a>
-    <span class="sep">·</span>
-    <a href="/about">About &amp; privacy</a>
-    <span class="sep">·</span>
-    <a href="https://github.com/ewanc26/malachite" target="_blank" rel="noopener">↗ GitHub</a>
-    <span class="sep">·</span>
-    <a href="https://ko-fi.com/ewancroft" target="_blank" rel="noopener">♥ Support</a>
-    <span class="sep">·</span>
-    <a href="https://liberapay.com/ewanc26/" target="_blank" rel="noopener">♥ Liberapay</a>
-  </footer>
+	<div class="step-viewport">
+		{#key step}
+			<div
+				class="step-slide"
+				in:fly={{ x: goingForward ? 40 : -40, duration: 280, easing: cubicOut }}
+				out:fly={{ x: goingForward ? -40 : 40, duration: 200, easing: cubicOut }}
+			>
+				{#if step === 0}
+					<ModeStep onselect={handleSelectMode} />
+				{:else if step === 1}
+					<AuthStep onauth={handleAuth} onback={handleBack} />
+				{:else if step === 2}
+					<FilesStep
+						bind:lastfmFiles
+						bind:spotifyFiles
+						{needs}
+						oncontinue={() => goTo(3)}
+						onback={handleBack}
+					/>
+				{:else if step === 3}
+					<OptionsStep
+						{mode}
+						bind:dryRun
+						bind:reverseOrder
+						bind:fresh
+						onstartimport={handleStartImport}
+						onback={handleBack}
+					/>
+				{:else if step === 4}
+					<RunStep
+						{isRunning}
+						{stopping}
+						{mode}
+						{dryRun}
+						{logs}
+						{progress}
+						{result}
+						{importError}
+						oncancel={() => {
+							cancelled = true;
+							stopping = true;
+						}}
+						onreset={handleReset}
+					/>
+				{/if}
+			</div>
+		{/key}
+	</div>
+	<footer>
+		<a href="/">← Home</a>
+		<span class="sep">·</span>
+		<a href="/about">About &amp; privacy</a>
+		<span class="sep">·</span>
+		<a href="https://github.com/ewanc26/malachite" target="_blank" rel="noopener">↗ GitHub</a>
+		<span class="sep">·</span>
+		<a href="https://ko-fi.com/ewancroft" target="_blank" rel="noopener">♥ Support</a>
+		<span class="sep">·</span>
+		<a href="https://liberapay.com/ewanc26/" target="_blank" rel="noopener">♥ Liberapay</a>
+	</footer>
 </main>
 
 <style>
-  main {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 2.5rem 1.5rem 5rem;
-    min-height: 100vh;
-  }
+	main {
+		max-width: 680px;
+		margin: 0 auto;
+		padding: 2.5rem 1.5rem 5rem;
+		min-height: 100vh;
+	}
 
-  header { margin-bottom: 2.5rem; text-align: center; }
+	header {
+		margin-bottom: 2.5rem;
+		text-align: center;
+	}
 
-  .logo-text {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 1.5rem;
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    color: var(--text);
-    margin: 0 0 0.25rem;
-  }
+	.logo-text {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 1.5rem;
+		font-weight: 500;
+		letter-spacing: -0.02em;
+		color: var(--text);
+		margin: 0 0 0.25rem;
+	}
 
-  .tagline { color: var(--muted); font-size: 0.875rem; margin: 0; }
+	.tagline {
+		color: var(--muted);
+		font-size: 0.875rem;
+		margin: 0;
+	}
 
-  .step-viewport { display: grid; overflow: hidden; }
-  .step-slide    { grid-area: 1 / 1; min-width: 0; }
+	.step-viewport {
+		display: grid;
+		overflow: hidden;
+	}
+	.step-slide {
+		grid-area: 1 / 1;
+		min-width: 0;
+	}
 
-  footer {
-    text-align: center;
-    font-size: 0.78rem;
-    color: var(--muted);
-    margin-top: 2rem;
-  }
+	footer {
+		text-align: center;
+		font-size: 0.78rem;
+		color: var(--muted);
+		margin-top: 2rem;
+	}
 
-  footer a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
-  footer a:hover { color: var(--accent); }
-  .sep { margin: 0 0.4rem; }
+	footer a {
+		color: var(--muted);
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+	footer a:hover {
+		color: var(--accent);
+	}
+	.sep {
+		margin: 0 0.4rem;
+	}
 </style>

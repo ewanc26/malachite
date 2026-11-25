@@ -17,26 +17,26 @@ import { Agent } from '@atproto/api';
 const SCOPE = 'atproto transition:generic';
 
 const CLIENT_ID = import.meta.env.DEV
-  ? `http://localhost?${new URLSearchParams([
-      ['redirect_uri', 'http://127.0.0.1:5173/import'],
-      ['scope', SCOPE],
-    ])}`
-  : 'https://malachite.croft.click/client-metadata.json';
+	? `http://localhost?${new URLSearchParams([
+			['redirect_uri', 'http://127.0.0.1:5173/import'],
+			['scope', SCOPE]
+		])}`
+	: 'https://malachite.croft.click/client-metadata.json';
 
 // Singleton promise — BrowserOAuthClient.load() is async.
 let _client: Promise<BrowserOAuthClient> | null = null;
 
 function getClient(): Promise<BrowserOAuthClient> {
-  if (!_client) {
-    // load() accepts clientId and dispatches correctly:
-    //   http:  → atprotoLoopbackClientMetadata(clientId) for dev
-    //   https: → fetches the metadata document for production
-    _client = BrowserOAuthClient.load({
-      clientId: CLIENT_ID,
-      handleResolver: 'https://bsky.social',
-    });
-  }
-  return _client;
+	if (!_client) {
+		// load() accepts clientId and dispatches correctly:
+		//   http:  → atprotoLoopbackClientMetadata(clientId) for dev
+		//   https: → fetches the metadata document for production
+		_client = BrowserOAuthClient.load({
+			clientId: CLIENT_ID,
+			handleResolver: 'https://bsky.social'
+		});
+	}
+	return _client;
 }
 
 /**
@@ -45,10 +45,10 @@ function getClient(): Promise<BrowserOAuthClient> {
  * Returns an Agent if a session is active, or null if the user still needs to sign in.
  */
 export async function initOAuth(): Promise<Agent | null> {
-  const client = await getClient();
-  const result = await client.init();
-  if (!result) return null;
-  return new Agent(result.session);
+	const client = await getClient();
+	const result = await client.init();
+	if (!result) return null;
+	return new Agent(result.session);
 }
 
 /**
@@ -56,7 +56,7 @@ export async function initOAuth(): Promise<Agent | null> {
  * Redirects the browser away — this never resolves normally.
  */
 export async function signInWithOAuth(handle: string): Promise<never> {
-  const client = await getClient();
-  await client.signIn(handle, { scope: SCOPE });
-  throw new Error('redirect should have occurred');
+	const client = await getClient();
+	await client.signIn(handle, { scope: SCOPE });
+	throw new Error('redirect should have occurred');
 }
