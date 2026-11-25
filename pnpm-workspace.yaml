@@ -1,3 +1,9 @@
 packages:
   - 'packages/*'
   - 'web'
+# Postinstall allow-list (pnpm 10 and pnpm 11 spellings).
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  core-js: false
+  esbuild: true
