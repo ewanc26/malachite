@@ -9,6 +9,6 @@ export { parseLastFmCsvContent, convertToPlayRecord };
 
 /** Read a browser File object and parse it as a Last.fm CSV export. */
 export async function parseLastFmFile(file: File): Promise<LastFmCsvRecord[]> {
-  const text = await file.text();
-  return parseLastFmCsvContent(text);
+	const text = await file.text();
+	return parseLastFmCsvContent(text);
 }

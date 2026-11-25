@@ -38,5 +38,6 @@ jobs:
           --test-skip-pattern="should encode timestamp correctly"
           --test-skip-pattern="should handle microsecond precision"
           "dist/tests/**/*.test.js"
+      - run: pnpm --filter malachite-web-frontend lint
       - run: pnpm --filter malachite-web-frontend check
       - run: pnpm --filter malachite-web-frontend build
